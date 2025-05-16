@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>서울시 부동산 정보 뷰어 (Vue Ver.)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #f8f9fa; color: #212529; font-family: 'Inter', sans-serif; } /* 밝은 회색 배경 */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #e9ecef; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb { background: #adb5bd; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6c757d; }
+        
+        .selected-row { background-color: #e9ecef; } /* 선택된 행 배경색 변경 */
+        
+        .modal-open { overflow: hidden; }
+
+        .pagination-button {
+            padding: 0.5rem 1rem; border: 1px solid #dee2e6; background-color: white;
+            color: #495057; border-radius: 0.375rem; transition: background-color 0.15s ease-in-out;
+        }
+        .pagination-button:hover:not(:disabled) { background-color: #f1f3f5; }
+        .pagination-button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .pagination-info { color: #495057; font-size: 0.875rem; }
+
+        /* 필터 버튼 스타일 */
+        .filter-trigger-button {
+            background-color: #6366f1; /* Indigo 500 */
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem; /* rounded-md */
+            font-weight: 500; /* medium */
+            transition: background-color 0.15s ease-in-out;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        }
+        .filter-trigger-button:hover {
+            background-color: #4f46e5; /* Indigo 600 */
+        }
+        .filter-trigger-button svg {
+            margin-right: 0.5rem;
+        }
+
+        /* 적용된 필터 표시 영역 */
+        #applied-filters-display {
+            font-size: 0.875rem; /* text-sm */
+            color: #4b5563; /* gray-600 */
+            margin-top: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            background-color: #f3f4f6; /* gray-100 */
+            border-radius: 0.375rem; /* rounded-md */
+            min-height: 2.5rem; /* 최소 높이 확보 */
+        }
+        #applied-filters-display:empty::before {
+            content: "현재 적용된 필터가 없습니다.";
+            color: #9ca3af; /* gray-400 */
+        }
+         /* 필터 모달 내부 버튼 스타일 */
+        .filter-modal-action-button {
+            padding: 0.625rem 1.25rem; /* py-2.5 px-5 */
+            border-radius: 0.375rem; /* rounded-md */
+            font-weight: 500; /* medium */
+            transition: background-color 0.15s ease-in-out;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        }
+        .filter-modal-search-button { /* 지역/단지명 검색 버튼 */
+            background-color: #10b981; /* Emerald 500 */
+            color: white;
+        }
+        .filter-modal-search-button:hover {
+            background-color: #059669; /* Emerald 600 */
+        }
+        .filter-modal-reset-button {
+            background-color: #e5e7eb; /* Gray 200 */
+            color: #374151; /* Gray 700 */
+        }
+        .filter-modal-reset-button:hover {
+            background-color: #d1d5db; /* Gray 300 */
+        }
+        .filter-modal-close-button {
+            background-color: #ef4444; /* Red 500 */
+            color: white;
+        }
+        .filter-modal-close-button:hover {
+            background-color: #dc2626; /* Red 600 */
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body class="p-4 md:p-8" style="font-family: 'Noto Sans KR', 'Inter', sans-serif;">
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+
+    <div id="filter-modal" class="fixed inset-0 bg-gray-800 bg-opacity-75 overflow-y-auto h-full w-full flex items-center justify-center hidden z-50 p-4">
+        <div class="relative bg-white w-full max-w-2xl mx-auto rounded-xl shadow-2xl flex flex-col max-h-[90vh]">
+            <div class="flex justify-between items-center p-5 border-b border-gray-200">
+                <h3 class="text-xl leading-6 font-semibold text-gray-800">검색 조건 설정</h3>
+                <button id="close-filter-modal-button-header" type="button" class="text-gray-400 bg-transparent hover:bg-gray-200 hover:text-gray-900 rounded-lg text-sm p-1.5 ml-auto inline-flex items-center transition-colors duration-150">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
+                </button>
+            </div>
+            
+            <div class="p-6 space-y-6 overflow-y-auto flex-grow">
+                <div class="pb-4 border-b border-gray-200">
+                    <h4 class="text-md font-semibold text-gray-700 mb-2">단지명 직접 검색</h4>
+                    <input type="text" id="complex-keyword-input-modal" class="filter-input mt-1 block w-full py-2.5 px-3 border border-gray-300 bg-white rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="단지명 입력 (예: 래미안)">
+                    <button id="search-by-keyword-button-modal" class="filter-modal-action-button filter-modal-search-button mt-3 w-full">단지명으로 검색</button>
+                </div>
+
+                <div class="pb-4 border-b border-gray-200">
+                    <h4 class="text-md font-semibold text-gray-700 mb-2">지역 선택</h4>
+                    <div class="space-y-3">
+                        <div>
+                            <label for="gu-select-modal" class="block text-sm font-medium text-gray-600 mb-1">구 선택:</label>
+                            <select id="gu-select-modal" name="guModal" class="filter-input block w-full py-2.5 px-3 border border-gray-300 bg-white rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                                <option value="">-- 구 선택 --</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="dong-select-modal" class="block text-sm font-medium text-gray-600 mb-1">동 선택:</label>
+                            <select id="dong-select-modal" name="dongModal" class="filter-input block w-full py-2.5 px-3 border border-gray-300 bg-white rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" disabled>
+                                <option value="">-- 동 선택 --</option>
+                            </select>
+                        </div>
+                        <button id="search-complex-button-modal" class="filter-modal-action-button filter-modal-search-button w-full">선택 동의 단지 목록 보기</button>
+                    </div>
+                </div>
+                
+                <div>
+                    <h4 class="text-md font-semibold text-gray-700 mb-2">매물 종류</h4>
+                    <div id="property-type-filter-modal" class="flex flex-wrap gap-x-4 gap-y-2">
+                        <div><input type="radio" id="prop-all-modal" name="propertyTypeModal" value="APT:OPST:ABYG:OBYG" class="form-radio h-4 w-4 text-indigo-600" checked><label for="prop-all-modal" class="ml-2 text-sm">전체</label></div>
+                        <div><input type="radio" id="prop-apt-modal" name="propertyTypeModal" value="APT" class="form-radio h-4 w-4 text-indigo-600"><label for="prop-apt-modal" class="ml-2 text-sm">아파트</label></div>
+                        <div><input type="radio" id="prop-opst-modal" name="propertyTypeModal" value="OPST" class="form-radio h-4 w-4 text-indigo-600"><label for="prop-opst-modal" class="ml-2 text-sm">오피스텔</label></div>
+                    </div>
+                </div>
+
+                <div>
+                    <h4 class="text-md font-semibold text-gray-700 mb-2">거래 유형</h4>
+                    <div id="trade-type-filter-modal" class="flex flex-wrap gap-x-4 gap-y-2">
+                        <div><input type="radio" id="trade-all-modal" name="tradeTypeModal" value="A1:B1:B2:B3" class="form-radio h-4 w-4 text-indigo-600" checked><label for="trade-all-modal" class="ml-2 text-sm">전체</label></div>
+                        <div><input type="radio" id="trade-매매-modal" name="tradeTypeModal" value="A1" class="form-radio h-4 w-4 text-indigo-600"><label for="trade-매매-modal" class="ml-2 text-sm">매매</label></div>
+                        <div><input type="radio" id="trade-전세-modal" name="tradeTypeModal" value="B1" class="form-radio h-4 w-4 text-indigo-600"><label for="trade-전세-modal" class="ml-2 text-sm">전세</label></div>
+                        <div><input type="radio" id="trade-월세-modal" name="tradeTypeModal" value="B2" class="form-radio h-4 w-4 text-indigo-600"><label for="trade-월세-modal" class="ml-2 text-sm">월세</label></div>
+                        <div><input type="radio" id="trade-단기임대-modal" name="tradeTypeModal" value="B3" class="form-radio h-4 w-4 text-indigo-600"><label for="trade-단기임대-modal" class="ml-2 text-sm">단기임대</label></div>
+                    </div>
+                </div>
+
+                <div class="space-y-3">
+                    <h4 class="text-md font-semibold text-gray-700">가격 (만원)</h4>
+                    <div id="main-price-filter-section-modal">
+                        <label id="main-price-label-modal" class="block text-sm font-medium text-gray-600 mb-1">매매가/전세금</label>
+                        <div class="flex items-center space-x-2">
+                            <input type="number" id="main-price-min-modal" class="block w-full py-2 px-3 border rounded-md sm:text-sm" placeholder="최소">
+                            <span class="text-gray-500">~</span>
+                            <input type="number" id="main-price-max-modal" class="block w-full py-2 px-3 border rounded-md sm:text-sm" placeholder="최대">
+                        </div>
+                    </div>
+                    <div id="monthly-rent-filter-section-modal" style="display: none;">
+                        <label class="block text-sm font-medium text-gray-600 mb-1">월세/단기임대료</label>
+                        <div class="flex items-center space-x-2">
+                            <input type="number" id="monthly-rent-min-modal" class="block w-full py-2 px-3 border rounded-md sm:text-sm" placeholder="최소">
+                            <span class="text-gray-500">~</span>
+                            <input type="number" id="monthly-rent-max-modal" class="block w-full py-2 px-3 border rounded-md sm:text-sm" placeholder="최대">
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <h4 class="text-md font-semibold text-gray-700 mb-1">전용 면적 (㎡)</h4>
+                    <div class="flex items-center space-x-2">
+                        <input type="number" id="area-min-modal" class="block w-full py-2 px-3 border rounded-md sm:text-sm" placeholder="최소">
+                        <span class="text-gray-500">~</span>
+                        <input type="number" id="area-max-modal" class="block w-full py-2 px-3 border rounded-md sm:text-sm" placeholder="최대">
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end p-4 border-t border-gray-200 rounded-b-xl bg-gray-50 space-x-3">
+                <button id="reset-filters-button-modal" type="button" class="filter-modal-action-button filter-modal-reset-button">필터 초기화</button>
+                <button id="close-filter-modal-button-footer" type="button" class="filter-modal-action-button filter-modal-close-button">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="property-modal" class="fixed inset-0 bg-gray-800 bg-opacity-75 overflow-y-auto h-full w-full flex items-center justify-center hidden z-50 p-4">
+        <div class="relative bg-white w-full max-w-4xl mx-auto rounded-xl shadow-2xl flex flex-col max-h-[90vh]">
+            <div class="flex justify-between items-center p-5 border-b border-gray-200">
+                <h3 class="text-xl leading-6 font-semibold text-gray-800" id="modal-title-text"></h3>
+                <button id="close-property-modal-button" type="button" class="text-gray-400 bg-transparent hover:bg-gray-200 hover:text-gray-900 rounded-lg text-sm p-1.5 ml-auto inline-flex items-center">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
+                </button>
+            </div>
+            <div class="flex-grow overflow-y-auto">
+                <div id="modal-tab-list" class="p-2 sm:p-4 md:p-6">
+                    <div id="modal-property-list-container"><p class="text-center py-10">매물 정보를 불러오는 중...</p></div>
+                </div>
+                <div id="modal-tab-detail" class="p-2 sm:p-4 md:p-6 hidden">
+                    <button id="modal-back-to-list-button" type="button" class="mb-4 text-indigo-600 hover:text-indigo-800 font-medium text-sm inline-flex items-center">
+                        <svg class="w-4 h-4 mr-1" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+                        목록으로 돌아가기
+                    </button>
+                    <div id="modal-property-detail-container"></div>
+                </div>
+            </div>
+            <div class="flex items-center justify-end p-4 border-t bg-gray-50">
+                <button id="modal-action-close-button" type="button" class="text-white bg-indigo-600 hover:bg-indigo-700 font-medium rounded-lg text-sm px-5 py-2.5 text-center">
+                    닫기
+                </button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

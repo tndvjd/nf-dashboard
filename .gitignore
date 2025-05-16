@@ -1,0 +1,20 @@
+# Dependencies
+/node_modules
+
+# Build directory
+/build
+/dist
+
+# 테스트 관련
+/coverage
+
+# dotenv 환경 변수 파일
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 운영체제 생성 파일
+.DS_Store
+Thumbs.db

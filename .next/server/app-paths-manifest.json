@@ -1,0 +1,5 @@
+{
+  "/api/articles/[articleNo]/route": "app/api/articles/[articleNo]/route.js",
+  "/api/complexes/[complexNo]/properties/route": "app/api/complexes/[complexNo]/properties/route.js",
+  "/page": "app/page.js"
+}
