@@ -1,0 +1,29 @@
+﻿PPTX 템플릿 요소 (자리표시자 또는 도형 이름),JSON 데이터 경로 (예상),데이터 예시 (JSON 참고),비고 (데이터 가공 필요 여부 등)
+슬라이드 1,,,
+텍스트_문서명 ({{문서명}}),(JSON에 없음 - 별도 입력 필요),"예: ""사택 물건 자료""","FastAPI 요청 시 추가 파라미터로 받거나, Python 코드 내에서 설정"
+텍스트_고객명 ({{고객명}}),(JSON에 없음 - 별도 입력 필요),"예: ""신지성 님""","FastAPI 요청 시 추가 파라미터로 받거나, Python 코드 내에서 설정"
+텍스트_회사명 ({{회사명}}),(JSON에 없음 - 별도 입력 필요),"예: ""AGC일렉트로닉스코리아""","FastAPI 요청 시 추가 파라미터로 받거나, Python 코드 내에서 설정"
+슬라이드 2 (매물 정보),,,
+텍스트_매물타이틀 (No.{{매물순번}} [{{지역구}}] {{단지명}}),"1부터 순차적으로 (순번), articleDetail.divisionName (지역구), articleDetail.aptName (단지명)","""1"", ""강남구"", ""보타니끄논현""",텍스트 조합 필요.
+텍스트_단지주소 ({{단지_주소}}),articleDetail.exposureAddress (또는 articleDetail.cityName + articleDetail.divisionName + articleDetail.sectionName + articleDetail.detailAddress),"""서울시 강남구 논현동""","exposureAddress가 충분하면 사용, 아니면 조합. detailAddress는 현재 비어있음."
+텍스트_단지준공연도 ({{단지_준공연도}}),articleDetail.aptUseApproveYmd,"""20241122""","""YYYY년 MM월"" 형식으로 변환 필요 (예: ""2024년 11월"")"
+텍스트_단지총세대수 ({{단지_총세대수}}),articleDetail.aptHouseholdCount,"""42""","숫자 뒤에 ""세대"" 붙이기"
+텍스트_단지총층수 ({{단지_총층수}}),articleFloor.totalFloorCount (또는 articleFloor.buildingHighestFloor),"""9""","숫자 뒤에 ""층"" 붙이기. buildingHighestFloor가 더 적합할 수 있음."
+텍스트_단지난방방식 ({{단지_난방방식}}),"articleDetail.aptHeatMethodTypeName, articleDetail.aptHeatFuelTypeName","""개별난방"", ""도시가스""","두 값을 조합하여 ""개별난방, 도시가스"" 형태로 표시"
+텍스트_매물동호수 ({{매물_동호수}}),"articleDetail.buildingName (동), articleAddition.floorInfo (층 정보)","""1동"", ""7/9""","floorInfo가 ""해당층/총층"" 형식이므로, ""1동 7층"" 등으로 조합. ""중층/고층/저층"" 정보로 추출되는 경우도 있음. 이 경우 ""1동 중층"" 등으로 조합 필요"
+텍스트_매물계약면적_m2 ({{매물_계약면적_m2}}),articleSpace.supplySpace,111.88,"숫자 포맷팅 (소수점) 및 ""㎡"" 단위는 템플릿에 있거나 코드에서 추가(현재 템플릿에 있음)"
+텍스트_매물계약면적_py ({{매물_계약면적_py}}),(JSON에 직접 없음 - 계산 필요),(111.88 / 3.3058),"supplySpace를 3.3058로 나누어 계산. 숫자 포맷팅 및 ""평"" 단위 추가(현재 템플릿에 ""평""은 기재해둠)"
+텍스트_매물전용면적_m2 ({{매물_전용면적_m2}}),articleSpace.exclusiveSpace,47.35,"숫자 포맷팅 및 ""㎡"" 단위 추가(현재 템플릿에 ㎡ 기재해둠)"
+텍스트_매물전용면적_py ({{매물_전용면적_py}}),(JSON에 직접 없음 - 계산 필요),(47.35 / 3.3058),"exclusiveSpace를 3.3058로 나누어 계산. 숫자 포맷팅 및 ""평"" 단위 추가(현재 템플릿에 ""평"" 기재해둠)"
+텍스트_매물방개수 ({{매물_방개수}}),articleDetail.roomCount,"""1""",
+텍스트_매물화장실개수 ({{매물_화장실개수}}),articleDetail.bathroomCount,"""1""",
+텍스트_매물방향 ({{매물_방향}}),articleAddition.direction (또는 articleFacility.directionTypeName + articleFacility.directionBaseTypeName),"""동향"" (또는 ""동향 거실 기준"")","articleAddition.direction이 간단. 템플릿은 ""남향(거실 기준)"" 형태. JSON의 directionBaseTypeName 활용 가능."
+텍스트_매물보증금 ({{매물_보증금}}),articlePrice.warrantPrice,10000,"숫자(단위: 만원) 포맷팅 (예: ""10,000"" -> ""1억""). articleAddition.dealOrWarrantPrc (""1억"") 활용 가능."
+텍스트_매물월세 ({{매물_월세}}),articlePrice.rentPrice,500,"숫자(단위: 만원) 포맷팅. articleAddition.rentPrc (""500"") 활용 가능."
+텍스트_매물기본관리비 ({{매물_기본관리비}}),administrationCostInfo,"""약 160,000원""","administrationCostInfo는 있으나 구체적인 금액은 없는 경우 ""확인 어려움""으로 표시"
+텍스트_매물입주가능일 ({{매물_입주가능일}}),articleDetail.moveInTypeName (또는 articleDetail.moveInPossibleYmd),"""즉시입주""",moveInTypeName 사용.
+텍스트_매물참고사항 ({{매물_참고사항}}),별도 입력 필요,"""6월중 입주 희망""",이 정보는 사용자가 직접 입력해야 하므로 추가 파라미터로 받거나 추후 프론트엔드에서 입력하게 설정
+텍스트_매물비고 ({{매물_비고}}),별도 입력 필요,"""풀옵션""",이 정보는 사용자가 직접 입력해야 하므로 추가 파라미터로 받거나 추후 프론트엔드에서 입력하게 설정
+img_complex_view (도형 이름),추후 별도 알고리즘 구축 예정,,이것은 별도로 구축 예정
+img_complex_floorplan (도형 이름),articleDetail.grandPlanList.imageSrc,imageSrc,"""https://landthumb-phinf.pstatic.net/""을 접두사로 쓰고 그 이후 imageSrc 붙임. 예시 : https://landthumb-phinf.pstatic.net/20250514_180/1747219382226EThiT_JPEG/76959307ab851d67f934afc16611c1b6.JPG"
+img_complex_mapimg (도형 이름),(JSON에 지도 이미지 URL 직접 없음),"articleDetail.latitude, articleDetail.longitude","위도, 경도 정보로 Static Map API(예: Naver, Google)를 호출하여 지도 이미지 URL을 생성해야 함. 추후 별도 구축 예정"
