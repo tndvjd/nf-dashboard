@@ -35,11 +35,11 @@ export interface Property {
 }
 
 // 매물 상세 정보 타입 - 제공된 JSON 기준
-interface ArticlePhoto {
+export interface ArticlePhoto {
   imageId: string
   imageOrder: number
   imageSrc: string
-  imageType: string
+  imageType?: string
   imageKey?: string
   etcItem1?: string
   smallCategoryName?: string
@@ -127,6 +127,7 @@ export interface PropertyDetail {
     isComplex?: boolean
     isOwnerTradeCompleted?: boolean
     isSafeLessorOfHug?: boolean
+    articlePhotos?: ArticlePhoto[] 
     [key: string]: any
   }
   articleAddition?: {
@@ -277,3 +278,97 @@ export interface PropertyDetail {
   isVrExposed?: boolean
   [key: string]: any
 }
+
+// PPT 생성 시 프론트엔드와 백엔드 간에 전달될 매물 정보 구조
+// RealEstateDashboard.tsx 및 PropertyGenerator.tsx 에서 사용
+export interface DisplayPropertyInfo {
+  articleNo: string
+  articleName?: string
+  realEstateTypeName?: string
+  tradeTypeName?: string
+  dealOrWarrantPrc?: string
+  rentPrc?: string
+  supplySpace?: number // 공급면적
+  exclusiveSpace?: number // 전용면적
+  floorInfo?: string // 층정보 (예: "10/15")
+  direction?: string // 방향 (예: "남향")
+}
+
+// --- PPT 생성 관련 타입 정의 추가 ---
+
+// PPT에 포함될 고객 정보
+export interface ClientInfo {
+  documentTitle: string; // 예: "강남 오피스텔 월세 물건 자료"
+  clientName: string;    // 예: "김철수 고객님"
+  companyName?: string;   // 예: "(주)미래부동산컨설팅"
+}
+
+// PPT에 포함될 지도 정보
+export interface MapInfo {
+  mapImageUrl?: string; // 정적 지도 이미지 URL
+}
+
+// property-generator.tsx에서 상태로 관리하고,
+// /api/generate-ppt 로 전송될 데이터의 기본 구조.
+export interface PropertyDataForGenerator extends PropertyDetail { // PropertyDetail을 확장
+  // PropertyDetail에 articleNo, articleName 등이 이미 포함되어 있음
+  // 추가적으로 사용자가 입력하는 PPT 관련 정보
+  documentTitle?: string;
+  clientName?: string;
+  companyName?: string;
+  // 위도, 경도는 PropertyDetail.articleDetail.latitude/longitude 사용
+}
+
+// Next.js 백엔드 API (/api/generate-ppt/route.ts)가
+// 프론트엔드로부터 요청받는 데이터의 타입.
+export interface PPTGenerationRequestData { 
+  articleDetail: PropertyDetail['articleDetail']; 
+  articleAddition?: PropertyDetail['articleAddition'];
+  articlePhotos?: ArticlePhoto[]; 
+  documentTitle: string;
+  clientName: string;
+  companyName?: string;
+  companyLogoUrl?: string;
+  mapImageUrl?: string;
+  // 다중 매물 지원을 위한 필드
+  properties?: {
+    articleDetail: PropertyDetail['articleDetail']
+    articleAddition?: PropertyDetail['articleAddition']
+  }[]
+  // 사진 URL 목록은 articleDetail.articlePhotos 에서 추출하여 사용
+  // 위도, 경도는 articleDetail.latitude, articleDetail.longitude 사용
+}
+
+// Python API (FastAPI)로 전달될 최종 데이터 구조 (Next.js 백엔드에서 이 형태로 가공 후 전송)
+export interface DataPayloadForPython {
+  articleDetail: {
+    articleNo: string; 
+    articleName?: string;
+    articlePhotos?: { photoUrl: string }[];
+    complexPyeongDetailList?: { floorPlanUrl: string }[];
+    // ... 기타 articleDetail에서 필요한 필드들
+    [key: string]: any; 
+  };
+  articleAddition: {
+    // ... 기타 articleAddition에서 필요한 필드들
+    [key: string]: any; 
+  };
+  documentTitle: string;
+  clientName: string;
+  companyName?: string;
+  mapImageUrl?: string; 
+  companyLogoUrl?: string;
+}
+
+// 기존 PropertyDataForPPT는 DataPayloadForPython 등으로 대체되었으므로 주석 처리합니다.
+/*
+export interface PropertyDataForPPT {
+  articleDetail: PropertyDetail;
+  clientInfo: ClientInfo;
+  mapInfo?: MapInfo;
+}
+*/
+
+// property-generator.tsx에서 매물 검색 후 상태로 관리할 데이터 타입 (기존 PropertyDetail 활용)
+// export type FetchedPropertyData = PropertyDetail;
+// 주석 처리: PropertyDetail을 직접 사용하면 되므로 별도 타입 선언 불필요.

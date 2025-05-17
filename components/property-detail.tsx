@@ -1,6 +1,6 @@
 "use client"
 
-import type { PropertyDetail as PropertyDetailType } from "@/types/real-estate"
+import type { PropertyDetail as PropertyDetailType, DisplayPropertyInfo } from "@/types/real-estate"
 import { Info, FileText, ExternalLink, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -13,7 +13,7 @@ import { useState } from "react"
 interface PropertyDetailProps {
   propertyDetail: PropertyDetailType | null
   isLoading: boolean
-  onGeneratePPT: (articleNo: string) => void
+  onGeneratePPT: (properties: DisplayPropertyInfo[]) => Promise<void>
 }
 
 const IMAGE_PREFIX = "https://landthumb-phinf.pstatic.net";
@@ -400,7 +400,40 @@ export default function PropertyDetail({ propertyDetail, isLoading, onGeneratePP
                         </div>
                       </div>
 
-                      <Button className="w-full" onClick={() => onGeneratePPT(propertyDetail.articleDetail?.articleNo || "")}>
+                      <Button
+                        variant="default"
+                        size="lg"
+                        onClick={() => {
+                          if (propertyDetail?.articleDetail?.articleNo) {
+                            const currentPropertyForPPT: DisplayPropertyInfo = {
+                              articleNo: propertyDetail.articleDetail.articleNo,
+                              articleName: propertyDetail.articleDetail.articleName,
+                              realEstateTypeName: propertyDetail.articleDetail.realestateTypeName,
+                              tradeTypeName: propertyDetail.articleDetail.tradeTypeName,
+                              dealOrWarrantPrc: propertyDetail.articleAddition?.dealOrWarrantPrc || propertyDetail.articlePrice?.warrantPrice?.toString(),
+                              rentPrc: propertyDetail.articleAddition?.rentPrc || propertyDetail.articlePrice?.rentPrice?.toString(),
+                              supplySpace: typeof (propertyDetail.articleAddition?.area1) === 'string' 
+                                ? parseFloat(propertyDetail.articleAddition.area1) 
+                                : propertyDetail.articleAddition?.area1 || (typeof propertyDetail.articleSpace?.supplySpace === 'string' 
+                                    ? parseFloat(propertyDetail.articleSpace.supplySpace) 
+                                    : propertyDetail.articleSpace?.supplySpace),
+                              exclusiveSpace: typeof (propertyDetail.articleAddition?.area2) === 'string' 
+                                ? parseFloat(propertyDetail.articleAddition.area2) 
+                                : propertyDetail.articleAddition?.area2 || (typeof propertyDetail.articleSpace?.exclusiveSpace === 'string' 
+                                    ? parseFloat(propertyDetail.articleSpace.exclusiveSpace) 
+                                    : propertyDetail.articleSpace?.exclusiveSpace),
+                              floorInfo: propertyDetail.articleAddition?.floorInfo || 
+                                         (propertyDetail.articleFloor?.correspondingFloorCount && propertyDetail.articleFloor?.totalFloorCount 
+                                           ? `${propertyDetail.articleFloor.correspondingFloorCount}층 / ${propertyDetail.articleFloor.totalFloorCount}층` 
+                                           : undefined),
+                              direction: propertyDetail.articleAddition?.direction || propertyDetail.articleFacility?.directionTypeName,
+                            };
+                            onGeneratePPT([currentPropertyForPPT]);
+                          }
+                        }}
+                        className="w-full"
+                        disabled={isLoading || !propertyDetail?.articleDetail?.articleNo}
+                      >
                         <FileText className="h-4 w-4 mr-2" />
                         PPT 자료 생성하기
                       </Button>

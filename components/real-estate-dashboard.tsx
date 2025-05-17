@@ -4,17 +4,18 @@ import { useState, useEffect } from "react"
 import FilterHeader from "./filter-header"
 import ComplexList from "./complex-list"
 import PropertyList from "./property-list"
-import PropertyDetail from "./property-detail"
+import PropertyDetailComponent from "./property-detail"; // Renamed component import to avoid conflict
 import FilterModal from "./filter-modal"
+import PropertyGenerator from "./property-generator"
+import { Button } from "@/components/ui/button"
 import type {
   PropertyType,
   TradeType,
   Complex,
   Property,
-  PropertyDetail as PropertyDetailType,
+  PropertyDetail as PropertyDetailType, // Alias the type import
+  DisplayPropertyInfo,
 } from "@/types/real-estate"
-import PropertyGenerator from "./property-generator"
-import { Button } from "@/components/ui/button"
 
 const ITEMS_PER_PAGE_COMPLEXES = 5; // 단지 목록 페이지당 항목 수
 
@@ -38,7 +39,7 @@ export default function RealEstateDashboard() {
   const [allComplexes, setAllComplexes] = useState<Complex[]>([]) // 모든 단지 목록
   const [complexes, setComplexes] = useState<Complex[]>([]) // 현재 페이지에 보여줄 단지 목록
   const [properties, setProperties] = useState<Property[]>([])
-  const [propertyDetail, setPropertyDetail] = useState<PropertyDetailType | null>(null)
+  const [propertyDetail, setPropertyDetail] = useState<PropertyDetailType | null>(null) // Use the aliased type
 
   // 선택 상태
   const [selectedComplex, setSelectedComplex] = useState<Complex | null>(null)
@@ -51,6 +52,7 @@ export default function RealEstateDashboard() {
   const [isComplexLoading, setIsComplexLoading] = useState(false)
   const [isPropertyLoading, setIsPropertyLoading] = useState(false)
   const [isDetailLoading, setIsDetailLoading] = useState(false)
+  const [isGeneratingPPT, setIsGeneratingPPT] = useState(false) // PPT 생성 로딩 상태
 
   // 탭 상태
   const [activeTab, setActiveTab] = useState("property-search")
@@ -206,16 +208,52 @@ export default function RealEstateDashboard() {
   // 매물 선택 핸들러
   const handlePropertySelect = (property: Property) => {
     setSelectedProperty(property)
-    fetchPropertyDetail(property.articleNo, property.complexNo || "")
+    fetchPropertyDetail(property.articleNo, property.complexNo || selectedComplex?.complexNo || "")
   }
 
-  // 물건자료 생성 탭 핸들러
-  const handleGeneratePPT = (articleNo: string) => {
-    console.log(`물건자료 생성 요청: ${articleNo}`)
-    // 실제 구현에서는 PPT 생성 API 호출
-    alert(`물건자료 생성 요청이 완료되었습니다. (매물번호: ${articleNo})`)
-  }
-  
+  // PPT 생성 요청 핸들러
+  const handleGeneratePPT = async (propertiesToGenerate: DisplayPropertyInfo[]): Promise<void> => {
+    if (!propertiesToGenerate || propertiesToGenerate.length === 0) {
+      alert("PPT를 생성할 매물을 선택해주세요.");
+      return;
+    }
+    setIsGeneratingPPT(true);
+    try {
+      const response = await fetch('/api/generate-ppt', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ properties: propertiesToGenerate }), // 매물 목록 데이터를 body에 담아 전송
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'PPT 생성에 실패했습니다.');
+      }
+
+      // 성공 시 파일 다운로드 처리 (API가 파일 스트림이나 URL을 반환한다고 가정)
+      // 예시: API가 Blob을 반환하는 경우
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `부동산_매물자료_${new Date().toISOString().slice(0,10)}.pptx`; // 날짜를 포함한 파일명
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+
+      alert('PPT 파일이 성공적으로 생성되어 다운로드됩니다.');
+
+    } catch (error: any) {
+      console.error("PPT 생성 오류:", error);
+      alert(`PPT 생성 중 오류 발생: ${error.message}`);
+    } finally {
+      setIsGeneratingPPT(false);
+    }
+  };
+
   // 단지 목록 페이지 변경 핸들러
   const handleComplexPageChange = (newPage: number) => {
     setCurrentComplexPage(newPage);
@@ -291,16 +329,20 @@ export default function RealEstateDashboard() {
 
               {/* 매물 상세 정보 */}
               <div className="lg:col-span-5 bg-white rounded-lg shadow h-full overflow-hidden">
-                <PropertyDetail
-                  propertyDetail={propertyDetail}
-                  isLoading={isDetailLoading}
-                  onGeneratePPT={handleGeneratePPT}
-                />
+                {selectedProperty && propertyDetail ? (
+                  <PropertyDetailComponent 
+                    propertyDetail={propertyDetail} 
+                    isLoading={isDetailLoading} 
+                    onGeneratePPT={handleGeneratePPT} 
+                  />
+                ) : (
+                  <p>매물을 선택해주세요.</p>
+                )}
               </div>
             </div>
           ) : (
             <div className="h-full bg-white rounded-lg shadow overflow-hidden">
-              <PropertyGenerator onGeneratePPT={handleGeneratePPT} />
+              <PropertyGenerator />
             </div>
           )}
         </div>

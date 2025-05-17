@@ -1,0 +1,447 @@
+"""
+PPT 생성 메인 모듈
+
+이 모듈은 부동산 매물 정보를 바탕으로 PPT 파일을 생성하는 프로그램의 진입점입니다.
+모듈화된 구조로 리팩토링되었습니다.
+"""
+import os
+from ppt_generator import create_ppt_file
+            value_str = match.group(1)
+            print(f"[DEBUG extract_area_from_description] Found value string: '{value_str}' for type '{area_type}'")
+            return float(value_str)
+        except ValueError as e:
+            print(f"[ERROR extract_area_from_description] ValueError converting '{value_str}': {e}")
+            return None
+    else:
+        print(f"[DEBUG extract_area_from_description] No match found for type '{area_type}'")
+        return None
+
+def format_move_in_date(data_list):
+    """입주 가능일 관련 데이터를 받아 포맷팅된 문자열로 반환합니다.
+    data_list: [moveInDate (str), moveInDiscussionPossibleYn (str)]
+    """
+    print(f"[DEBUG format_move_in_date] Input data_list: {data_list}")
+    if not isinstance(data_list, list) or len(data_list) < 2:
+        return "정보 없음"
+    
+    move_in_date_str, discussion_possible_yn = data_list
+    print(f"[DEBUG format_move_in_date] moveInDate: '{move_in_date_str}', discussionPossibleYn: '{discussion_possible_yn}'")
+
+    if move_in_date_str and move_in_date_str.strip().lower() == "즉시입주":
+        return "즉시입주"
+    
+    if discussion_possible_yn and discussion_possible_yn.upper() == 'Y':
+        return "입주협의가능"
+        
+    if move_in_date_str and move_in_date_str.strip():
+        return move_in_date_str
+
+    return "정보 없음"
+
+def format_article_no_title(data_list):
+    """매물번호, 지역구, 단지명을 받아 포맷팅된 문자열로 반환합니다. (No. 붙는 기존 형식)"""
+    if not isinstance(data_list, list) or len(data_list) < 3:
+        print(f"[DEBUG format_article_no_title] Invalid data_list: {data_list}")
+        return "정보 없음"
+    article_no, division_name, apt_name = data_list
+    article_no = article_no if article_no is not None else "N/A"
+    division_name = division_name if division_name is not None else "N/A"
+    apt_name = apt_name if apt_name is not None else "N/A"
+    return f"No.{article_no} [{division_name}] {apt_name}"
+
+def format_title_with_item_index(data_list):
+    """매물 순번, 지역구, 단지명을 받아 포맷팅된 문자열로 반환합니다. (순번. 형식)"""
+    if not isinstance(data_list, list) or len(data_list) < 3:
+        print(f"[DEBUG format_title_with_item_index] Invalid data_list: {data_list}")
+        return "정보 없음"
+    item_idx, division_name, apt_name = data_list
+    item_idx_str = str(item_idx) if item_idx is not None else "-"
+    division_name_str = str(division_name) if division_name is not None else "N/A"
+    apt_name_str = str(apt_name) if apt_name is not None else "N/A"
+    return f"{item_idx_str}. [{division_name_str}] {apt_name_str}"
+
+def format_area_m2_value(area_m2_input):
+    """m² 면적 값을 받아 소수점 둘째 자리까지 포맷팅합니다."""
+    print(f"[DEBUG format_area_m2_value] Input for m2 formatting: {area_m2_input}, type: {type(area_m2_input)}")
+    try:
+        val = float(area_m2_input)
+        return f"{val:.2f}"
+    except (ValueError, TypeError):
+        print(f"[ERROR format_area_m2_value] Invalid input for m2 formatting: {area_m2_input}")
+        return "-" # 오류 발생 시 기본값
+
+def format_area_py_value(area_m2_input):
+    """m² 면적 값을 평으로 변환하고 소수점 둘째 자리까지 포맷팅합니다."""
+    print(f"[DEBUG format_area_py_value] Input for pyeong formatting: {area_m2_input}, type: {type(area_m2_input)}")
+    try:
+        val = float(area_m2_input)
+        py_val = val / 3.305785
+        return f"{py_val:.2f}"
+    except (ValueError, TypeError):
+        print(f"[ERROR format_area_py_value] Invalid input for pyeong formatting: {area_m2_input}")
+        return "-" # 오류 발생 시 기본값
+
+def replace_text_in_frame(shape_or_cell_or_frame, old_text_pattern: str, new_text: str):
+    # Determine the actual TextFrame object
+    if isinstance(shape_or_cell_or_frame, TextFrame):
+        text_frame = shape_or_cell_or_frame
+    elif hasattr(shape_or_cell_or_frame, 'text_frame'):
+        text_frame = shape_or_cell_or_frame.text_frame
+    else:
+        # This case should ideally not happen if called correctly, log and return
+        print(f"[ERROR replace_text_in_frame] Unexpected type for input object: {type(shape_or_cell_or_frame)}. Cannot get text_frame.")
+        return
+
+    old_text_pattern_re = re.compile(re.escape(old_text_pattern))
+
+    for i, paragraph in enumerate(text_frame.paragraphs):
+        current_new_text = str(new_text) if new_text is not None else ""
+        
+        if old_text_pattern_re.search(paragraph.text):
+            original_paragraph_text = paragraph.text
+            replaced_paragraph_text = old_text_pattern_re.sub(lambda match: current_new_text, original_paragraph_text)
+            
+            if original_paragraph_text != replaced_paragraph_text:
+                paragraph.clear()  # 기존 내용 및 run 삭제
+                new_run = paragraph.add_run()
+                new_run.text = replaced_paragraph_text
+                if new_run.font: # 기본적으로 font 객체는 생성됨
+                    new_run.font.name = '나눔고딕'
+                    new_run.font.size = Pt(11)
+                print(f"[DEBUG Style] Applied NanumGothic 11pt by clearing and adding run for '{current_new_text[:30]}...' after replacing '{old_text_pattern}'")
+            elif old_text_pattern == current_new_text: # 플레이스홀더와 대체될 텍스트가 같은 경우 (스타일만 적용)
+                for run in paragraph.runs:
+                    # 해당 run이 실제로 플레이스홀더를 포함하는지 확인 (선택적, 보통은 단락 전체가 플레이스홀더)
+                    if old_text_pattern_re.search(run.text):
+                        if run.font:
+                            run.font.name = '나눔고딕'
+                            run.font.size = Pt(11)
+                            print(f"[DEBUG Style] Applied NanumGothic 11pt to existing run (text: '{run.text[:30]}...') matching placeholder '{old_text_pattern}'")
+                        else:
+                            print(f"[DEBUG Style] Run in paragraph '{paragraph.text[:30]}' (styling existing) has no font object.")
+
+# 하드코딩된 매핑 정보 (플레이스홀더 -> JSON 경로 또는 처리 함수)
+hardcoded_mappings = [
+    # 슬라이드 0 (첫 번째 슬라이드 - 표지)
+    # 이 부분은 실제 PPT 템플릿의 표지에 맞게 플레이스홀더와 슬라이드 인덱스 조정 필요
+    # 예를 들어, 표지에 {{문서명}}, {{고객명}}, {{회사명}} 플레이스홀더가 있다고 가정
+    # 실제 슬라이드 인덱스는 0부터 시작합니다.
+    # (0, "{{문서명}}", "documentTitle", None, False),
+    # (0, "{{고객명}}", "clientName", None, False),
+    # (0, "{{회사명}}", "companyName", None, False),
+
+    # 슬라이드 1 (두 번째 슬라이드 - 상세 정보 페이지, 이미지 기준)
+    # 이미지에 보이는 플레이스홀더들을 기반으로 작성
+    # 데이터 경로는 property_data['articleDetail'] 또는 property_data['articleAddition']을 기준으로 작성
+        
+    # 매물 기본 정보 (상단 타이틀)
+    (1, "No.{{매물순번}} [{{지역구}}] {{단지명}}", ["articleDetail.articleNo", "articleDetail.divisionName", "articleDetail.aptName"], format_article_no_title, False),
+    (1, "{{단지_주소}}", "articleDetail.exposureAddress", None, False),
+    (1, "{{단지_준공연도}}", "articleDetail.aptUseApproveYmd", 
+        lambda x: f"{x[:4]}년 {x[4:6]}월" if x and len(x) >= 6 else "정보 없음", False),
+    (1, "{{단지_총세대수}}", "articleDetail.aptHouseholdCount", 
+        lambda x: f"{x} 세대" if x else "정보 없음", False),
+    # {{단지_총층수}}에 대한 정확한 경로 확인 필요. articleAddition.floorInfo 에서 '/' 뒤쪽?
+    # 우선 aptDetail.totalDongCount 로 임시 설정 (의미는 다름: 총 동수)
+    (1, "{{단지_총층수}}", "articleDetail.totalDongCount", 
+        lambda x: f"{x} 개동" if x else "정보 없음", False), # 이 플레이스홀더는 '총 동수'가 적합할 수 있음, 또는 층수 데이터 경로 확인
+    (1, "{{단지_난방방식}}", ["articleDetail.aptHeatMethodTypeName", "articleDetail.aptHeatFuelTypeName"],
+        lambda vals: f"{vals[0] if vals[0] else ''}, {vals[1] if vals[1] else ''}".strip(', '), False),
+
+    # 물건 정보 테이블
+    (1, "{{매물_동호수}}", ["articleDetail.buildingName", "articleAddition.floorInfo"],
+        lambda vals: f"{vals[0] if vals[0] else ''} {vals[1].split('/')[0] + '층' if vals[1] and '/' in vals[1] else (vals[1] if vals[1] else '')}".strip(), False),
+        
+    # 계약면적, 전용면적은 실제 JSON 데이터 구조에 맞게 수정
+    (1, "{{매물_계약면적_㎡}}", "articleAddition.area1", format_area_m2_value, False), 
+    (1, "{{매물_계약면적_py}}", "articleAddition.area1", format_area_py_value, False), 
+    (1, "{{매물_전용면적_㎡}}", "articleAddition.area2", format_area_m2_value, False), 
+    (1, "{{매물_전용면적_py}}", "articleAddition.area2", format_area_py_value, False), 
+
+    (1, "{{매물_방개수}}", "articleDetail.roomCount", lambda x: str(x) if x else "-", False),
+    (1, "{{매물_화장실개수}}", "articleDetail.bathroomCount", lambda x: str(x) if x else "-", False),
+    (1, "{{매물_방향}}", "articleAddition.direction", lambda x: str(x) if x else "정보 없음", False),
+
+    (1, "{{매물_보증금}}", "articleAddition.dealOrWarrantPrc", lambda x: str(x) if x else "-", False), # (만원)은 템플릿에 있다고 가정
+    (1, "{{매물_월세}}", "articleAddition.rentPrc", lambda x: str(x) if x else "-", False), # (만원)은 템플릿에 있다고 가정
+        
+    # 기본관리비는 경로 확인 및 '확인 어려움' 처리 로직 필요
+    (1, "{{매물_기본관리비}}", "articlePrice.managementCost", 
+        lambda x: str(x) if x else "확인 어려움", False), # 실제 경로로 수정 필요
+    (1, "{{매물_입주가능일}}", "articleDetail.moveInTypeName", 
+        lambda x: str(x) if x else "-", False), # 직접 값 사용
+        
+    (1, "{{매물_참고사항}}", "userRemarks", lambda x: str(x) if x else "", False), # FastAPI 요청 본문에서 전달
+    (1, "{{매물_비고}}", "userNotes", lambda x: str(x) if x else "", False),     # FastAPI 요청 본문에서 전달
+        
+    # 이미지 플레이스홀더 (예시, 실제 도형 이름과 슬라이드 인덱스, 데이터 경로 확인 필요)
+    # (1, "img_main_picture", "articleAddition.representativeImgUrl", None, True), # 대표 이미지
+    # (1, "img_floor_plan", "articleDetail.complexPyeongDetailList[0].floorPlanUrl", None, True), # 평면도
+]
+
+# 슬라이드 0 (표지)의 문서명, 고객명, 회사명 처리 (property_data 최상위 키 사용)
+# 이 값들은 FastAPI 요청에서 property_data 딕셔너리의 일부로 전달된다고 가정합니다.
+title_mappings = [
+    (0, "{{문서명}}", "documentTitle"), # 실제 플레이스홀더 이름으로 변경
+    (0, "{{고객명}}", "clientName"),     # 실제 플레이스홀더 이름으로 변경
+    (0, "{{회사명}}", "companyName")    # 실제 플레이스홀더 이름으로 변경
+]
+
+def find_shape_by_placeholder_or_name(slide, identifier: str, is_placeholder_search: bool, slide_idx_for_log: int):
+    if is_placeholder_search:
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                if identifier in shape.text_frame.text:
+                    print(f"[DEBUG][Slide {slide_idx_for_log+1}] Shape found by placeholder text '{identifier}': name='{shape.name if shape.name else 'N/A'}', type={shape.shape_type}")
+                    return shape
+            if shape.has_table:
+                for row_idx, row in enumerate(shape.table.rows):
+                    for col_idx, cell in enumerate(row.cells):
+                        if cell.text_frame and identifier in cell.text_frame.text:
+                            print(f"[DEBUG find_shape] Found placeholder '{identifier}' in table cell ({row_idx},{col_idx}) on slide {slide_idx_for_log+1}")
+                            return cell # 셀 객체 반환
+    else:
+        try:
+            shape = slide.shapes.get_by_name(identifier)
+            if shape:
+                print(f"[DEBUG][Slide {slide_idx_for_log+1}] Shape found by name '{identifier}': type={shape.shape_type}")
+                return shape
+        except KeyError:
+            pass
+    
+    print(f"[WARNING][Slide {slide_idx_for_log+1}] Shape with identifier '{identifier}' (search_mode: {'placeholder' if is_placeholder_search else 'name'}) not found. Skipping.")
+    return None
+
+def normalize_url(url: str, base_domain: str = "https://image.neonet.co.kr") -> str:
+    if url.startswith("//"):
+        return "https:" + url
+    if url.startswith("/"):
+        return base_domain + url
+    return url
+
+def add_image_from_url(slide, image_url: str, left: float, top: float, width: Optional[float] = None, height: Optional[float] = None):
+    try:
+        normalized_url = normalize_url(image_url)
+        response = requests.get(normalized_url, stream=True)
+        response.raise_for_status()
+        image_stream = BytesIO(response.content)
+        
+        if width and height:
+            slide.shapes.add_picture(image_stream, left, top, width=width, height=height)
+        elif width:
+            slide.shapes.add_picture(image_stream, left, top, width=width)
+        elif height:
+            slide.shapes.add_picture(image_stream, left, top, height=height)
+        else: 
+            slide.shapes.add_picture(image_stream, left, top)
+        print(f"[DEBUG] Added image from URL: {normalized_url}")
+    except requests.exceptions.RequestException as e:
+        print(f"[ERROR] Failed to download image {image_url}: {e}")
+    except Exception as e:
+        print(f"[ERROR] Failed to add image {image_url}: {e}")
+
+def get_value_from_path(data: dict, path):
+    """주어진 딕셔너리에서 .으로 구분된 경로를 사용하여 값을 가져옵니다."""
+    keys = path.split('.')
+    current_value = data
+    for key in keys:
+        if isinstance(current_value, dict) and key in current_value:
+            current_value = current_value[key]
+        elif isinstance(current_value, list):
+            try:
+                idx = int(key)
+                if 0 <= idx < len(current_value):
+                    current_value = current_value[idx]
+                else:
+                    print(f"[DEBUG get_value_from_path] Index {idx} out of range for list.")
+                    return None
+            except ValueError:
+                print(f"[DEBUG get_value_from_path] Cannot convert key '{key}' to int for list indexing.")
+                return None
+        else:
+            print(f"[DEBUG get_value_from_path] Cannot access key '{key}' in value of type {type(current_value)}.")
+            return None
+    return current_value
+
+def format_article_no_title(data_list):
+    """매물번호, 지역구, 단지명을 받아 포맷팅된 문자열로 반환합니다. (No. 붙는 기존 형식)"""
+    if not isinstance(data_list, list) or len(data_list) < 3:
+        print(f"[DEBUG format_article_no_title] Invalid data_list: {data_list}")
+        return "정보 없음"
+    article_no, division_name, apt_name = data_list
+    article_no = article_no if article_no is not None else "N/A"
+    division_name = division_name if division_name is not None else "N/A"
+    apt_name = apt_name if apt_name is not None else "N/A"
+    return f"No.{article_no} [{division_name}] {apt_name}"
+
+def create_ppt_file(property_data: Dict, map_image_url: Optional[str], template_filepath: str, mapping_csv_filepath: Optional[str] = None) -> str:
+    print("--- create_ppt_file 진입 (하드코딩된 매핑 사용) ---")
+    print(f"[DEBUG] Received property_data keys: {list(property_data.keys()) if property_data else 'None'}")
+    print(f"[DEBUG] Received map_image_url: {map_image_url}")
+    print(f"[DEBUG] Using template: {template_filepath}")
+    prs = Presentation(template_filepath)
+
+    for slide_idx, placeholder, value_text in title_mappings:
+        if slide_idx < len(prs.slides):
+            slide = prs.slides[slide_idx]
+            shape_to_modify = find_shape_by_placeholder_or_name(slide, placeholder, True, slide_idx)
+            if shape_to_modify:
+                target_text_frame = None
+                if hasattr(shape_to_modify, 'text_frame') and callable(getattr(shape_to_modify, 'text_frame', None)):
+                    target_text_frame = shape_to_modify.text_frame
+                elif hasattr(shape_to_modify, 'text_frame'): 
+                    target_text_frame = shape_to_modify.text_frame
+                
+                if target_text_frame:
+                    print(f"[DEBUG][Slide {slide_idx+1}] Replacing text for '{placeholder}' with '{value_text}'")
+                    replace_text_in_frame(target_text_frame, placeholder, str(property_data.get(value_text, "")))
+                else:
+                    print(f"[WARNING][Slide {slide_idx+1}] Shape for '{placeholder}' found, but no text_frame to modify.")
+        else:
+            print(f"[WARNING] Slide index {slide_idx} for '{placeholder}' is out of bounds.")
+
+    for slide_idx, placeholder_or_shapename, data_path_or_paths, processing_func, is_image in hardcoded_mappings:
+        if slide_idx >= len(prs.slides):
+            print(f"[WARNING] Slide index {slide_idx} for '{placeholder_or_shapename}' is out of bounds. Skipping.")
+            continue
+        
+        slide = prs.slides[slide_idx]
+        shape_to_modify = None
+        raw_value = None
+
+        if isinstance(data_path_or_paths, list): 
+            raw_values_list = []
+            for dp in data_path_or_paths:
+                raw_values_list.append(get_value_from_path(property_data, dp))
+            raw_value = raw_values_list
+        elif isinstance(data_path_or_paths, str): 
+            raw_value = get_value_from_path(property_data, data_path_or_paths)
+        else:
+            raw_value = data_path_or_paths 
+
+        processed_value = ""
+        if processing_func:
+            try:
+                processed_value = processing_func(raw_value)
+            except Exception as e:
+                print(f"[ERROR][Slide {slide_idx+1}] Error processing value for '{placeholder_or_shapename}' with data '{raw_value}': {e}")
+                processed_value = "오류" 
+        elif raw_value is not None:
+            processed_value = str(raw_value)
+        
+        is_placeholder_search = "{{" in placeholder_or_shapename and "}}" in placeholder_or_shapename
+        shape_identifier = placeholder_or_shapename
+        if is_placeholder_search:
+            shape_to_modify = find_shape_by_placeholder_or_name(slide, shape_identifier, True, slide_idx)
+        
+        if not shape_to_modify and not is_placeholder_search: 
+            shape_to_modify = find_shape_by_placeholder_or_name(slide, shape_identifier, False, slide_idx)
+        elif not shape_to_modify and is_placeholder_search: 
+            print(f"[WARNING][Slide {slide_idx+1}] Placeholder shape '{shape_identifier}' not found.")
+            continue 
+
+        if not shape_to_modify:
+            print(f"[WARNING][Slide {slide_idx+1}] Shape '{shape_identifier}' not found. Skipping.")
+            continue
+
+        if is_image:
+            if processed_value and isinstance(processed_value, str):
+                print(f"[DEBUG][Slide {slide_idx+1}] Adding image to shape '{placeholder_or_shapename}' from URL: {processed_value}")
+                try:
+                    add_image_from_url(slide, processed_value, shape_to_modify.left, shape_to_modify.top, 
+                                       width=shape_to_modify.width if hasattr(shape_to_modify, 'width') else None, 
+                                       height=shape_to_modify.height if hasattr(shape_to_modify, 'height') else None)
+                except Exception as e:
+                    print(f"[ERROR][Slide {slide_idx+1}] Failed to add image for '{placeholder_or_shapename}': {e}")
+            elif processed_value:
+                print(f"[WARNING][Slide {slide_idx+1}] Image URL for '{placeholder_or_shapename}' is not a string: {processed_value}")
+            else:
+                print(f"[WARNING][Slide {slide_idx+1}] No image URL found for '{placeholder_or_shapename}'.")
+        else:
+            target_text_frame = None
+            if hasattr(shape_to_modify, 'text_frame') and callable(getattr(shape_to_modify, 'text_frame', None)):
+                 target_text_frame = shape_to_modify.text_frame
+            elif hasattr(shape_to_modify, 'text_frame'): 
+                target_text_frame = shape_to_modify.text_frame
+            elif hasattr(shape_to_modify, 'row_idx'): 
+                 if hasattr(shape_to_modify, 'text_frame'):
+                     target_text_frame = shape_to_modify.text_frame
+            
+            if target_text_frame:
+                print(f"[DEBUG][Slide {slide_idx+1}] Replacing text for '{placeholder_or_shapename}' with '{processed_value}'")
+                replace_text_in_frame(target_text_frame, shape_identifier if is_placeholder_search else "", str(processed_value) if processed_value is not None else "")
+            else:
+                print(f"[WARNING][Slide {slide_idx+1}] Shape for '{placeholder_or_shapename}' (type: {shape_to_modify.shape_type if hasattr(shape_to_modify, 'shape_type') else 'Unknown'}) has no usable text_frame.")
+
+    if map_image_url:
+        map_slide_idx = 1 
+        map_shape_name = "img_map" 
+        if map_slide_idx < len(prs.slides):
+            map_slide = prs.slides[map_slide_idx]
+            map_shape = find_shape_by_placeholder_or_name(map_slide, map_shape_name, False, map_slide_idx)
+            if map_shape:
+                print(f"[DEBUG][Slide {map_slide_idx+1}] Adding map image to shape '{map_shape_name}' from URL: {map_image_url}")
+                try:
+                    add_image_from_url(map_slide, map_image_url, map_shape.left, map_shape.top, 
+                                   width=map_shape.width if hasattr(map_shape, 'width') else None, 
+                                   height=map_shape.height if hasattr(map_shape, 'height') else None)
+                except Exception as e:
+                    print(f"[ERROR][Slide {map_slide_idx+1}] Failed to add map image: {e}")     
+            else:
+                print(f"[WARNING][Slide {map_slide_idx+1}] Map image shape '{map_shape_name}' not found.")
+        else:
+            print(f"[WARNING] Slide index {map_slide_idx} for map image is out of bounds.")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.pptx') as tmp_file:
+        prs.save(tmp_file.name)
+        temp_file_path = tmp_file.name
+    
+    print(f"--- PPT 생성 완료 (하드코딩된 매핑): {temp_file_path} ---")
+    return temp_file_path
+
+if __name__ == '__main__':
+    sample_property_data = {
+        "documentTitle": "테스트 문서 제목",
+        "clientName": "홍길동 고객님",
+        "companyName": "테스트 주식회사",
+        "userRemarks": "빠른 입주 희망",
+        "userNotes": "풀옵션 선호",
+        "articleDetail": {
+            "articleNo": "1234567",
+            "divisionName": "강남구",
+            "aptName": "럭셔리 아파트",
+            "exposureAddress": "서울시 강남구 테헤란로 123",
+            "aptUseApproveYmd": "20201020",
+            "aptHouseholdCount": "500",
+            "totalDongCount": 5,
+            "aptHeatMethodTypeName": "개별난방",
+            "aptHeatFuelTypeName": "도시가스",
+            "buildingName": "101동",
+            "roomCount": "3",
+            "bathroomCount": "2",
+            "moveInTypeName": "즉시입주",
+            "moveInPossibleYmd": None 
+        },
+        "articleAddition": {
+            "floorInfo": "15/25", 
+            "direction": "남향",
+            "dealOrWarrantPrc": "10억", 
+            "rentPrc": "300" 
+        },
+        "articleSpace": { 
+            "supplySpace": 110.75, 
+            "exclusiveSpace": 84.50 
+        },
+        "articlePrice": {
+            "managementCost": "15만원" 
+        }
+    }
+    sample_map_image_url = None 
+    template_path = os.path.join(os.path.dirname(__file__), 'ppt_template.pptx')
+    
+    if not os.path.exists(template_path):
+        print(f"[ERROR] PPT template file not found at: {template_path}")
+        print("Please ensure 'ppt_template.pptx' exists in the same directory as this script, or provide the correct path.")
+    else:
+        output_ppt_path = create_ppt_file(sample_property_data, sample_map_image_url, template_path, None)
+        print(f"Generated PPT file at: {output_ppt_path}")

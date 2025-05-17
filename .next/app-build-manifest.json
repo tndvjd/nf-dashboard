@@ -1,5 +1,10 @@
 {
   "pages": {
+    "/api/articles/[articleNo]/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/articles/[articleNo]/route.js"
+    ],
     "/layout": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
@@ -21,15 +26,10 @@
       "static/chunks/main-app.js",
       "static/chunks/app/api/complexes/[complexNo]/properties/route.js"
     ],
-    "/api/articles/[articleNo]/route": [
+    "/api/generate-ppt/route": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/api/articles/[articleNo]/route.js"
-    ],
-    "/api/complexes/search-by-name/route": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/api/complexes/search-by-name/route.js"
+      "static/chunks/app/api/generate-ppt/route.js"
     ]
   }
 }
