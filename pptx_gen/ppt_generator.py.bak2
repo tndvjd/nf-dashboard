@@ -1,0 +1,482 @@
+"""
+PPT 생성 핵심 기능 모듈
+
+이 모듈은 부동산 매물 정보를 바탕으로 PPT 파일을 생성하는 핵심 기능을 담당합니다.
+"""
+import os
+import tempfile
+# import csv # csv 모듈은 현재 코드에서 사용되지 않음
+from pptx import Presentation
+from pptx.util import Inches, Pt # Inches는 ppt_utils에서 사용, 여기서 직접 필요 X. 단, add_image_from_url 호출 시 EMU->인치 변환 필요 시 사용
+from typing import Dict, Optional, Any, List
+# from io import BytesIO # BytesIO는 ppt_utils에서 사용
+
+from ppt_utils import replace_text_in_frame, find_shape_by_placeholder_or_name, add_image_from_url, duplicate_slide, apply_text_to_shape
+from data_utils import get_value_from_path
+from mapping_config import get_default_mappings, get_title_mappings
+# from mapping_config import get_image_mappings # get_image_mappings 사용 시 주석 해제
+
+def create_ppt_file(property_data: Dict, map_image_url: Optional[str], template_filepath: str, mapping_csv_filepath: Optional[str] = None) -> str:
+    """
+    매물 정보를 바탕으로 PPT 파일을 생성합니다.
+
+    Args:
+        property_data: 매물 정보 딕셔너리
+        map_image_url: 지도 이미지 URL (선택 사항)
+        template_filepath: PPT 템플릿 파일 경로
+        mapping_csv_filepath: 매핑 CSV 파일 경로 (선택 사항, 현재 직접 사용 안함)
+
+    Returns:
+        생성된 임시 PPT 파일 경로
+    """
+    print("--- create_ppt_file 진입 (모듈화된 매핑 사용) ---")
+    print(f"[DEBUG] Received property_data keys: {list(property_data.keys()) if property_data else 'None'}")
+    print(f"[DEBUG] Received map_image_url: {map_image_url}")
+    print(f"[DEBUG] Using template: {template_filepath}")
+
+    try:
+        prs = Presentation(template_filepath)
+    except Exception as e:
+        print(f"[ERROR] Failed to load PPT template: {template_filepath}. Error: {e}")
+        # 적절한 예외 처리 또는 빈 경로 반환
+        return ""
+
+
+    # 표지 슬라이드 처리 (표제, 고객명, 회사명 등)
+    title_mappings = get_title_mappings()
+    for slide_idx, placeholder, value_key, font_name, font_size, is_bold in title_mappings:
+        if slide_idx < len(prs.slides):
+            slide = prs.slides[slide_idx]
+            # 플레이스홀더로 도형 찾기 (True)
+            shape_to_modify = find_shape_by_placeholder_or_name(slide, placeholder, True, slide_idx)
+            if shape_to_modify:
+                target_text_frame = None
+                # text_frame 속성 확인 및 가져오기
+                if hasattr(shape_to_modify, 'text_frame') and shape_to_modify.text_frame is not None:
+                    # callable 체크는 text_frame이 메서드일 경우에만 필요, 일반적으로는 속성임
+                    target_text_frame = shape_to_modify.text_frame
+                else: # 테이블 셀의 경우, shape_to_modify가 셀 객체이고 text_frame을 가짐
+                    # find_shape_by_placeholder_or_name이 셀을 반환했을 때, 이미 text_frame을 가진 셀 객체임
+                    # 이 부분은 find_shape_by_placeholder_or_name의 반환값에 따라 달라질 수 있음.
+                    # 현재 find_shape_by_placeholder_or_name은 셀 자체를 반환하므로, 셀의 text_frame을 써야함.
+                    # 위의 hasattr(shape_to_modify, 'text_frame') 로직으로 커버될 것으로 보임.
+                    pass
+
+
+                if target_text_frame:
+                    value_to_set = str(get_value_from_path(property_data, value_key, "")) # 데이터 가져오기
+                    print(f"[DEBUG][Slide {slide_idx+1}] Replacing text in placeholder '{placeholder}' with data from key '{value_key}'")
+                    replace_text_in_frame(target_text_frame, placeholder, value_to_set,
+                                          font_name, font_size, is_bold)
+                else:
+                    print(f"[WARNING][Slide {slide_idx+1}] Shape for placeholder '{placeholder}' found, but no usable text_frame.")
+            else:
+                print(f"[WARNING][Slide {slide_idx+1}] Placeholder shape '{placeholder}' not found.")
+        else:
+            print(f"[WARNING] Slide index {slide_idx} for placeholder '{placeholder}' is out of bounds.")
+
+    # 매핑 정보 기반 값 대체 (get_default_mappings)
+    default_mappings = get_default_mappings()
+    for slide_idx, placeholder_or_shapename, data_path_or_paths, processing_func, is_image, font_name, font_size, is_bold in default_mappings:
+        if slide_idx >= len(prs.slides):
+            print(f"[WARNING] Slide index {slide_idx} for '{placeholder_or_shapename}' is out of bounds. Skipping.")
+            continue
+
+        slide = prs.slides[slide_idx]
+        shape_to_modify = None
+        raw_value = None
+
+        # 데이터 경로에서 값 가져오기
+        if isinstance(data_path_or_paths, list):
+            raw_values_list = []
+            for dp in data_path_or_paths:
+                # get_value_from_path에 기본값 인자 추가 (예: "")
+                raw_values_list.append(get_value_from_path(property_data, dp, ""))
+            raw_value = raw_values_list
+        elif isinstance(data_path_or_paths, str):
+            raw_value = get_value_from_path(property_data, data_path_or_paths, "")
+        else: # 직접 값 (예: 이미지 URL 문자열이 아닌 경우 등) 또는 이미 처리된 값
+            raw_value = data_path_or_paths
+
+
+        processed_value: Any = "" # 타입 명확화
+        if processing_func:
+            try:
+                processed_value = processing_func(raw_value)
+            except Exception as e:
+                print(f"[ERROR][Slide {slide_idx+1}] Error processing value for '{placeholder_or_shapename}' with data '{raw_value}': {e}")
+                processed_value = "오류" # 또는 빈 문자열 등 오류 표시
+        elif raw_value is not None:
+            processed_value = str(raw_value)
+        # raw_value가 None이고 processing_func도 없으면 processed_value는 "" 유지
+
+        # 도형 찾기
+        # is_placeholder_search는 플레이스홀더 패턴({{...}}) 존재 여부로 판단
+        is_placeholder_search_mode = isinstance(placeholder_or_shapename, str) and "{{" in placeholder_or_shapename and "}}" in placeholder_or_shapename
+        shape_identifier = placeholder_or_shapename
+
+        # 플레이스홀더 검색 모드이거나, 이름 검색 모드일 때 각각 검색
+        if is_placeholder_search_mode:
+            shape_to_modify = find_shape_by_placeholder_or_name(slide, shape_identifier, True, slide_idx)
+        else: # 이름으로 검색 (is_placeholder_search_mode가 False일 때)
+            shape_to_modify = find_shape_by_placeholder_or_name(slide, shape_identifier, False, slide_idx)
+
+
+        if not shape_to_modify:
+            # find_shape_by_placeholder_or_name 내부에서 이미 경고 출력하므로 여기서는 추가 출력 안 함
+            continue
+
+
+        if is_image:
+            image_url_to_add = None
+            if processed_value and isinstance(processed_value, str):
+                image_url_to_add = processed_value
+            elif isinstance(raw_value, str) and not processing_func : # 가공 함수 없고 원본이 URL 문자열인 경우
+                image_url_to_add = raw_value
+
+            if image_url_to_add:
+                print(f"[DEBUG][Slide {slide_idx+1}] Adding image to shape '{placeholder_or_shapename}' from URL: {image_url_to_add}")
+                try:
+                    # add_image_from_url은 위치/크기를 인치 단위로 받음.
+                    # shape_to_modify의 .left, .top 등은 EMU 단위. 변환 필요.
+                    # 간단하게 Inches로 나누거나, pptx.util.Length 객체로 변환 후 .inches 속성 사용
+                    # 또는 add_image_from_url이 EMU를 직접 받도록 수정.
+                    # 여기서는 shape의 위치/크기를 그대로 전달 (add_image_from_url에서 Inches()를 사용한다고 가정)
+                    # 이 부분은 add_image_from_url의 구현과 일치해야 함.
+                    # 만약 shape_to_modify가 플레이스홀더가 아닌 실제 이미지 도형이면 그 위치/크기 사용.
+                    # 플레이스홀더 텍스트 박스를 이미지 위치로 사용한다면, 그 박스의 크기를 활용.
+                    img_left = shape_to_modify.left
+                    img_top = shape_to_modify.top
+                    img_width = getattr(shape_to_modify, 'width', None)
+                    img_height = getattr(shape_to_modify, 'height', None)
+
+                    add_image_from_url(slide, image_url_to_add, img_left, img_top, width=img_width, height=img_height)
+                except Exception as e:
+                    print(f"[ERROR][Slide {slide_idx+1}] Failed to add image for '{placeholder_or_shapename}': {e}")
+            else:
+                print(f"[WARNING][Slide {slide_idx+1}] No valid image URL found for '{placeholder_or_shapename}'. Processed: '{processed_value}', Raw: '{raw_value}'")
+        else: # 텍스트 처리
+            target_text_frame = None
+            if hasattr(shape_to_modify, 'text_frame') and shape_to_modify.text_frame is not None:
+                target_text_frame = shape_to_modify.text_frame
+            # find_shape_by_placeholder_or_name이 Cell 객체를 반환한 경우, Cell 객체가 text_frame을 가짐.
+
+            if target_text_frame:
+                actual_placeholder_pattern = ""
+                if is_placeholder_search_mode: # 플레이스홀더 검색 모드일 때만 플레이스홀더 패턴 전달
+                    actual_placeholder_pattern = shape_identifier
+
+                print(f"[DEBUG][Slide {slide_idx+1}] Replacing text for '{placeholder_or_shapename}' with processed value.")
+                replace_text_in_frame(target_text_frame,
+                                      actual_placeholder_pattern, # 플레이스홀더 패턴 전달
+                                      str(processed_value), # 새 텍스트
+                                      font_name, font_size, is_bold) # 폰트 정보 전달
+            else:
+                print(f"[WARNING][Slide {slide_idx+1}] Shape '{placeholder_or_shapename}' (type: {getattr(shape_to_modify, 'shape_type', 'Unknown')}) has no usable text_frame.")
+
+    # 지도 이미지 처리 (제공된 경우)
+    if map_image_url:
+        map_slide_idx = 1 # 지도 이미지를 넣을 슬라이드 번호 (0부터 시작)
+        map_shape_name = "img_map" # 지도 이미지를 넣을 도형의 이름
+
+        if map_slide_idx < len(prs.slides):
+            map_slide = prs.slides[map_slide_idx]
+            map_shape = find_shape_by_placeholder_or_name(map_slide, map_shape_name, False, map_slide_idx) # 이름으로 검색
+            if map_shape:
+                print(f"[DEBUG][Slide {map_slide_idx+1}] Adding map image to shape '{map_shape_name}' from URL: {map_image_url}")
+                try:
+                    # add_image_from_url 호출 시 위치/크기 단위 주의
+                    m_left = map_shape.left
+                    m_top = map_shape.top
+                    m_width = getattr(map_shape, 'width', None)
+                    m_height = getattr(map_shape, 'height', None)
+                    add_image_from_url(map_slide, map_image_url, m_left, m_top, width=m_width, height=m_height)
+                except Exception as e:
+                    print(f"[ERROR][Slide {map_slide_idx+1}] Failed to add map image for shape '{map_shape_name}': {e}")
+            else:
+                print(f"[WARNING][Slide {map_slide_idx+1}] Map image shape '{map_shape_name}' not found.")
+        else:
+            print(f"[WARNING] Slide index {map_slide_idx} for map image is out of bounds (Total slides: {len(prs.slides)}).")
+
+    # 임시 파일 생성 및 저장
+    temp_file_path = ""
+    try:
+        # delete=False는 함수 종료 후에도 파일 유지를 위함. 호출 측에서 필요시 삭제해야 함.
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pptx', prefix='gen_ppt_') as tmp_file:
+            prs.save(tmp_file.name)
+            temp_file_path = tmp_file.name
+        print(f"--- PPT 생성 완료 (모듈화된 매핑): {temp_file_path} ---")
+    except Exception as e:
+        print(f"[ERROR] Failed to save PPT to temporary file: {e}")
+        # 필요시 생성된 임시 파일 경로가 있더라도 오류 발생 시 빈 문자열 반환 또는 예외 재발생
+        if temp_file_path and os.path.exists(temp_file_path): # 저장 실패 시 부분 파일 삭제 시도
+             try:
+                 os.remove(temp_file_path)
+             except OSError:
+                 pass # 삭제 실패는 무시
+        return "" # 오류 시 빈 경로 반환
+    
+    return temp_file_path
+
+
+def create_ppt_file_multi(properties_data: List[Dict], document_info: Dict, map_image_url: Optional[str] = None, template_filepath: str = None, mapping_csv_filepath: Optional[str] = None):
+    """
+    여러 매물 정보를 바탕으로 하나의 PPT 파일을 생성합니다.
+    
+    Args:
+        properties_data: 매물 정보 딕셔너리 목록
+        document_info: 문서 제목, 고객명 등 문서 전체에 적용될 정보
+        map_image_url: 지도 이미지 URL (선택 사항)
+        template_filepath: PPT 템플릿 파일 경로
+        mapping_csv_filepath: 매핑 CSV 파일 경로 (선택 사항)
+        
+    Returns:
+        생성된 임시 PPT 파일 경로
+    """
+    if not template_filepath or not os.path.exists(template_filepath):
+        print(f"[ERROR] 템플릿 파일이 없거나 경로가 잘못되었습니다: {template_filepath}")
+        return ""
+
+    try:
+        # Presentation 클래스를 사용하여 템플릿 파일 열기 (import는 파일 상단에 이미 존재)
+        prs = Presentation(template_filepath)
+    except Exception as e:
+        print(f"[ERROR] PPT 템플릿 파일을 여는 중 오류 발생: {e}")
+        return ""
+
+    default_mappings = get_default_mappings() 
+
+    if prs.slides and document_info:
+        cover_slide_idx = 0 
+        if len(prs.slides) > cover_slide_idx:
+            cover_slide = prs.slides[cover_slide_idx]
+            print(f"[INFO] 표지 슬라이드(인덱스 {cover_slide_idx})에 문서 정보 적용 중...")
+            placeholders_to_update = {
+                "{{문서제목}}": document_info.get("document_title", ""),
+                "{{고객명}}": document_info.get("customer_name", ""),
+                "{{작성일}}": document_info.get("creation_date", "") 
+            }
+            for shape in cover_slide.shapes:
+                if shape.has_text_frame:
+                    for key, value in placeholders_to_update.items():
+                        if key in shape.text_frame.text:
+                            apply_text_to_shape(shape, shape.text_frame.text.replace(key, str(value)))
+                            print(f"[DEBUG] 표지 '{key}' 업데이트 완료: {value}")
+
+    template_slide_idx = 1
+    if len(prs.slides) <= template_slide_idx:
+        print(f"[ERROR] 템플릿에 매물 정보 슬라이드(인덱스 {template_slide_idx})가 없습니다.")
+        return ""
+
+    source_property_slide_layout = prs.slides[template_slide_idx].slide_layout
+    # 첫번째 매물이 사용하게 될 원본 템플릿 슬라이드 객체를 저장해둡니다.
+    first_property_slide_object = prs.slides[template_slide_idx]
+
+    for i, property_data in enumerate(properties_data):
+        try:
+            print(f"--- {i+1}번째 매물 처리 시작 ---")
+            property_slide = None 
+
+            if i == 0:
+                # 첫 번째 매물은 템플릿의 두 번째 슬라이드(인덱스 1)를 그대로 사용
+                property_slide = first_property_slide_object 
+                print(f"[INFO] 첫 번째 매물은 템플릿 슬라이드 {template_slide_idx+1}번을 사용합니다.")
+            else:
+                # XML 요소 직접 복사 방식 - 변경된 접근법
+                print(f"[INFO] {i+1}번째 매물을 위한 슬라이드 복제 중...")
+                
+                # 새로운 접근법 - 속성 복사 방식 사용
+                property_slide = prs.slides.add_slide(source_property_slide_layout)
+                
+                # 원본 슬라이드에서 형태 복사
+                source_shapes = first_property_slide_object.shapes
+                target_shapes = property_slide.shapes
+                
+                # 테이블 및 기타 도형 추가
+                try:
+                    # 직접 원본 슬라이드의 도형 복사 - first_property_slide_object에서 가져옴
+                    for shape in first_property_slide_object.shapes:
+                        if shape.has_table:
+                            # 테이블 복사
+                            rows = len(shape.table.rows)
+                            cols = len(shape.table.columns)
+                            left, top, width, height = shape.left, shape.top, shape.width, shape.height
+                            
+                            table = target_shapes.add_table(rows, cols, left, top, width, height).table
+                            
+                            # 테이블 내용 복사
+                            for r_idx in range(rows):
+                                for c_idx in range(cols):
+                                    src_cell = shape.table.cell(r_idx, c_idx)
+                                    tgt_cell = table.cell(r_idx, c_idx)
+                                    tgt_cell.text = src_cell.text
+                            
+                        elif shape.has_text_frame:
+                            # 텍스트박스 복사
+                            left, top, width, height = shape.left, shape.top, shape.width, shape.height
+                            textbox = target_shapes.add_textbox(left, top, width, height)
+                            textbox.text_frame.text = shape.text_frame.text
+                            
+                        elif hasattr(shape, 'shape_type'):
+                            # 기본 도형 복사
+                            left, top, width, height = shape.left, shape.top, shape.width, shape.height
+                            if hasattr(shape, 'text'):
+                                new_shape = target_shapes.add_shape(
+                                    shape.shape_type, left, top, width, height)
+                                if hasattr(new_shape, 'text'):
+                                    new_shape.text = shape.text
+                    
+                    # 임시 파일 삭제
+                    try:
+                        os.remove(temp_path)
+                    except:
+                        pass
+                except Exception as shape_e:
+                    print(f"[WARNING] 도형 복사 중 오류: {shape_e}")
+                
+                print(f"[INFO] {i+1}번째 매물 슬라이드 생성 완료 (새 슬라이드 인덱스: {prs.slides.index(property_slide)})")
+                
+            current_slide_actual_idx = prs.slides.index(property_slide)
+            print(f"[INFO] {i+1}번째 매물 정보를 슬라이드(인덱스 {current_slide_actual_idx})에 적용합니다.")
+            _apply_property_to_slide(property_slide, property_data, default_mappings, 
+                                    current_slide_actual_idx)
+        except Exception as e:
+            print(f"[ERROR] {i+1}번째 매물 슬라이드 처리 중 오류 발생: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    if map_image_url and properties_data:
+        map_shape_name = "img_map"
+        
+        for idx, slide_to_check in enumerate(prs.slides):
+            if idx == 0 and len(prs.slides) > 1: # 표지 슬라이드는 건너뜁니다 (매물 슬라이드가 뒤에 더 있다면)
+                continue
+
+            is_target_slide_for_map = False
+            # 현재 슬라이드가 첫 번째 매물 정보를 담기 위해 사용된 원본 슬라이드 객체인지 확인
+            if slide_to_check == first_property_slide_object:
+                 is_target_slide_for_map = True
+            # 또는, 해당 슬라이드가 첫 번째 매물 슬라이드 이후에 동일한 레이아웃으로 복제된 슬라이드인지 확인
+            elif idx > prs.slides.index(first_property_slide_object) and slide_to_check.slide_layout == source_property_slide_layout:
+                 is_target_slide_for_map = True
+            
+            if is_target_slide_for_map:
+                map_shape = find_shape_by_placeholder_or_name(slide_to_check, map_shape_name, False, idx)
+                if map_shape:
+                    try:
+                        m_left, m_top = map_shape.left, map_shape.top
+                        m_width, m_height = getattr(map_shape, 'width', None), getattr(map_shape, 'height', None)
+                        if not m_width or m_width <= 0 or not m_height or m_height <= 0:
+                            print(f"[WARNING][Slide {idx+1}] 지도 Placeholder '{map_shape_name}'의 크기가 유효하지 않습니다. 이미지 원본 크기로 시도합니다.")
+                            m_width, m_height = None, None
+                        add_image_from_url(slide_to_check, map_image_url, m_left, m_top, width=m_width, height=m_height)
+                        print(f"[DEBUG][Slide {idx+1}] 지도 이미지 추가 성공 ('{map_shape_name}')")
+                    except Exception as e:
+                        print(f"[ERROR][Slide {idx+1}] 지도 이미지 추가 실패 ('{map_shape_name}'): {e}")
+                else:
+                    print(f"[DEBUG][Slide {idx+1}] 지도 이미지를 추가할 '{map_shape_name}' 플레이스홀더/도형을 찾지 못했습니다.")
+
+    temp_file_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pptx', prefix='gen_ppt_multi_') as tmp_file:
+            prs.save(tmp_file.name)
+            temp_file_path = tmp_file.name
+        print(f"--- 다중 매물 PPT 생성 완료: {temp_file_path} (매물 {len(properties_data)}개) ---")
+    except Exception as e:
+        print(f"[ERROR] 다중 매물 PPT 저장 중 오류 발생: {e}")
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except OSError as oe:
+                print(f"[WARNING] 임시 파일 삭제 중 오류: {oe}")
+        return "" 
+    
+    return temp_file_path
+
+
+def _apply_property_to_slide(slide, property_data: Dict, mappings, slide_idx: int):
+    """
+    슬라이드에 매물 정보를 적용합니다. create_ppt_file_multi의 내부 헬퍼 함수입니다.
+    
+    Args:
+        slide: 정보를 적용할 슬라이드 객체
+        property_data: 매물 정보 딕셔너리
+        mappings: 매핑 정보 리스트
+        slide_idx: 슬라이드 인덱스 (로깅용)
+    """
+    # 매물 상세 정보 매핑 처리
+    for mapping_slide_idx, placeholder_or_shapename, data_path_or_paths, processing_func, is_image, font_name, font_size, is_bold in mappings:
+        # 모든 매핑 정보에 대해 처리 (원본 슬라이드 인덱스 제한 제거)
+        # 템플릿 슬라이드 기준으로 정의된 매핑이 모든 복제된 슬라이드에 적용되도록 함
+        if mapping_slide_idx != 1:  # 매물 정보는 항상 두 번째 슬라이드 템플릿 기준으로 참조하지만, 매핑은 모든 슬라이드에 진행
+            # 주석 처리 대신 로깅만 추가
+            print(f"[DEBUG][Slide {slide_idx+1}] 매핑 슬라이드 인덱스 {mapping_slide_idx}에 대한 정보도 처리합니다.")
+            pass
+            
+        # 데이터 경로에서 값 가져오기
+        raw_value = None
+        if isinstance(data_path_or_paths, list):
+            raw_values_list = []
+            for dp in data_path_or_paths:
+                raw_values_list.append(get_value_from_path(property_data, dp, ""))
+            raw_value = raw_values_list
+        elif isinstance(data_path_or_paths, str):
+            raw_value = get_value_from_path(property_data, data_path_or_paths, "")
+        else:
+            raw_value = data_path_or_paths
+
+        # 값 처리 (포맷팅)
+        processed_value = ""
+        if processing_func:
+            try:
+                processed_value = processing_func(raw_value)
+            except Exception as e:
+                print(f"[ERROR][Slide {slide_idx+1}] 매물 정보 처리 중 오류: '{placeholder_or_shapename}': {e}")
+                processed_value = "오류"  # 또는 빈 문자열 등 오류 표시
+        elif raw_value is not None:
+            processed_value = str(raw_value)
+
+        # 플레이스홀더 검색 모드 여부 확인
+        is_placeholder_search_mode = isinstance(placeholder_or_shapename, str) and "{{" in placeholder_or_shapename and "}}" in placeholder_or_shapename
+
+        # 도형 찾기
+        shape_to_modify = None
+        if is_placeholder_search_mode:
+            shape_to_modify = find_shape_by_placeholder_or_name(slide, placeholder_or_shapename, True, slide_idx)
+        else:  # 이름으로 검색
+            shape_to_modify = find_shape_by_placeholder_or_name(slide, placeholder_or_shapename, False, slide_idx)
+
+        if not shape_to_modify:
+            continue
+
+        # 이미지 또는 텍스트 처리
+        if is_image:
+            image_url_to_add = None
+            if processed_value and isinstance(processed_value, str):
+                image_url_to_add = processed_value
+            elif isinstance(raw_value, str) and not processing_func:  # 가공 함수 없고 원본이 URL 문자열인 경우
+                image_url_to_add = raw_value
+
+            if image_url_to_add:
+                try:
+                    img_left = shape_to_modify.left
+                    img_top = shape_to_modify.top
+                    img_width = getattr(shape_to_modify, 'width', None)
+                    img_height = getattr(shape_to_modify, 'height', None)
+                    add_image_from_url(slide, image_url_to_add, img_left, img_top, width=img_width, height=img_height)
+                except Exception as e:
+                    print(f"[ERROR][Slide {slide_idx+1}] 이미지 추가 실패: '{placeholder_or_shapename}': {e}")
+        else:  # 텍스트 처리
+            target_text_frame = None
+            if hasattr(shape_to_modify, 'text_frame') and shape_to_modify.text_frame is not None:
+                target_text_frame = shape_to_modify.text_frame
+
+            if target_text_frame:
+                actual_placeholder_pattern = ""
+                if is_placeholder_search_mode:
+                    actual_placeholder_pattern = placeholder_or_shapename
+
+                replace_text_in_frame(target_text_frame, 
+                                     actual_placeholder_pattern,
+                                     str(processed_value),
+                                     font_name, font_size, is_bold)

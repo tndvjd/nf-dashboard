@@ -1,0 +1,141 @@
+--- Slide 1 ---
+Slide Layout: 제목 및 내용
+
+Shape ID: 0
+Shape Type: Picture
+Shape Name: 배경이미지
+Left: 0, Top: -1, Width: 12192000, Height: 6861223
+This shape contains an image
+
+Shape ID: 1
+Shape Type: Picture
+Shape Name: 대형로고
+Left: 3365841, Top: 1080765, Width: 5460317, Height: 2142726
+This shape contains an image
+
+Shape ID: 2
+Shape Type: GraphicFrame
+Shape Name: 고객명/이름
+Left: 2523350, Top: 5137155, Width: 5572026, Height: 424746
+Table with 1 rows and 2 columns
+  Row 0, Col 0: 顧客名
+  Row 0, Col 1:
+
+--- Slide 2 ---
+Slide Layout: 제목 및 내용
+
+Shape ID: 0
+Shape Type: Connector
+Shape Name: 직선 연결선 3
+Left: 0, Top: 412105, Width: 12192000, Height: 0
+
+Shape ID: 1
+Shape Type: Shape
+Shape Name: 물건명
+Left: 35506, Top: 71019, Width: 12156494, Height: 369332
+Text: 　　　　　　　　　　　　　　No.3 [서초구] 현대썬앤빌서초 (오피스텔)
+This shape might be used as an image container
+
+Shape ID: 2
+Shape Type: GraphicFrame
+Shape Name: 단지정보표
+Left: 204366, Top: 3530261, Width: 3648544, Height: 2375829
+Table with 5 rows and 2 columns
+  Row 0, Col 0: 소재지
+  Row 0, Col 1: 서울시 서초구 서초동 1337-21
+  Row 1, Col 0: 건축연도
+  Row 1, Col 1: 2015년 10월
+  Row 2, Col 0: 세대수
+  Row 2, Col 1: 166세대
+  Row 3, Col 0: 총층수
+  Row 3, Col 1: 17층
+  Row 4, Col 0: 난방
+  Row 4, Col 1: 개별난방
+
+Shape ID: 3
+Shape Type: Shape
+Shape Name: 단지정보
+Left: 204366, Top: 489106, Width: 1908699, Height: 338554
+Text: 단지정보
+This shape might be used as an image container
+
+Shape ID: 4
+Shape Type: Connector
+Shape Name: 직선 연결선 7
+Left: 0, Top: 6031684, Width: 12192000, Height: 0
+
+Shape ID: 5
+Shape Type: Picture
+Shape Name: 회사로고
+Left: 1470327, Top: 6064060, Width: 2284510, Height: 743794
+This shape contains an image
+
+Shape ID: 6
+Shape Type: Picture
+Shape Name: 글로벌부동산
+Left: 256483, Top: 6101620, Width: 1035422, Height: 732112
+This shape contains an image
+
+Shape ID: 7
+Shape Type: Shape
+Shape Name: 회사정보
+Left: 3990109, Top: 6236843, Width: 8135216, Height: 461665
+Text: 서울시 강남구 강남대로 455, B동5층508호(서초동, 강남태영데시앙루브)
+뉴퍼스트부동산중개법인, 대표공인중개사 : 최보경 /　Office : 02-3662-8818 Fax : 02-3662-8844
+This shape might be used as an image container
+
+Shape ID: 8
+Shape Type: Shape
+Shape Name: 단지사진
+Left: 204366, Top: 854065, Width: 3648544, Height: 2606261
+Text:
+This shape might be used as an image container
+
+Shape ID: 9
+Shape Type: Connector
+Shape Name: 직선 연결선 17
+Left: 4050492, Top: 412105, Width: 0, Height: 5619579
+
+Shape ID: 10
+Shape Type: Shape
+Shape Name: 물건정보
+Left: 4248075, Top: 487761, Width: 1908699, Height: 338554
+Text: 물건정보
+This shape might be used as an image container
+
+Shape ID: 11
+Shape Type: GraphicFrame
+Shape Name: 물건정보표
+Left: 4248075, Top: 856521, Width: 4147130, Height: 5049560
+Table with 8 rows and 2 columns
+  Row 0, Col 0: 동/호
+  Row 0, Col 1: 1동 15층
+  Row 1, Col 0: 계약면적
+  Row 1, Col 1: 46.15㎡/13.98坪
+  Row 2, Col 0: 전용면적
+  Row 2, Col 1: 26.12㎡/7.915坪
+  Row 3, Col 0: 방수/욕실수
+  Row 3, Col 1: 1/1
+  Row 4, Col 0: 보증금/
+임대료
+  Row 4, Col 1: 3000/100(만원)
+  Row 5, Col 0: 관리비
+  Row 5, Col 1: 약 15만원
+  Row 6, Col 0: 방향
+  Row 6, Col 1: 서향
+  Row 7, Col 0: 비고
+  Row 7, Col 1: 입주 7월말 이후 협의가능
+
+Shape ID: 12
+Shape Type: Shape
+Shape Name: 평면도
+Left: 8538251, Top: 854066, Width: 3449381, Height: 2518764
+Text:
+This shape might be used as an image container
+
+Shape ID: 13
+Shape Type: Shape
+Shape Name: 지도
+Left: 8538250, Top: 3485172, Width: 3449382, Height: 2420918
+Text:
+This shape might be used as an image container

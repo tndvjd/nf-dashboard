@@ -1,0 +1,94 @@
+import asyncio
+from playwright.async_api import async_playwright
+import re
+
+def clean_broker_info(broker_info: str) -> str:
+    """
+    중개사 정보를 정제하고 가독성을 높입니다.
+
+    Args:
+        broker_info (str): 원본 중개사 정보 문자열
+
+    Returns:
+        str: 정제된 중개사 정보 문자열
+    """
+    # "길찾기" 제거
+    broker_info = broker_info.replace("길찾기", "")
+    
+    # "등록번호" 텍스트 제거
+    broker_info = broker_info.replace("등록번호", "")
+    
+    # "소재지" 텍스트 제거
+    broker_info = broker_info.replace("소재지", "")
+    
+    # "대표" 텍스트 제거
+    broker_info = broker_info.replace("대표", "")
+    
+    # "전화" 텍스트 제거
+    broker_info = broker_info.replace("전화", "")
+    
+    # 전화번호 이후의 불필요한 데이터 제거
+    phone_numbers = re.findall(r'\d{2,3}-\d{3,4}-\d{4}', broker_info)
+    if phone_numbers:
+        last_phone_number = phone_numbers[-1]
+        # 전화번호 이후의 텍스트 제거
+        broker_info = broker_info.split(last_phone_number)[0] + last_phone_number
+    
+    # "최근 3개월 집주인확인" 이후의 텍스트 제거
+    if "최근 3개월 집주인확인" in broker_info:
+        broker_info = broker_info.split("최근 3개월 집주인확인")[0]
+    
+    # 가독성을 높이기 위해 줄바꿈 추가
+    broker_info = broker_info.replace("\n", "\n")
+    
+    return broker_info.strip()
+
+async def test_scrape_property_info(url: str):
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=False)
+        context = await browser.new_context()
+        page = await context.new_page()
+        await page.goto(url, wait_until="networkidle", timeout=60000)
+
+        await page.wait_for_selector("#detailContents1 > div.detail_box--summary > table", timeout=60000)
+
+        info = {}
+
+        # 테이블 정보 스크래핑
+        table = await page.query_selector("#detailContents1 > div.detail_box--summary > table")
+        if table:
+            rows = await table.query_selector_all("tr")
+            for row in rows:
+                ths = await row.query_selector_all("th")
+                tds = await row.query_selector_all("td")
+                for i in range(len(ths)):
+                    key = await ths[i].inner_text()
+                    value = await tds[i].inner_text() if i < len(tds) else ""
+                    info[key.strip()] = value.strip()
+
+        # "중개사" 정보를 포함한 th 요소 찾기
+        broker_info = ""
+        for row in rows:
+            ths = await row.query_selector_all("th")
+            tds = await row.query_selector_all("td")
+            for th in ths:
+                th_text = await th.inner_text()
+                if "중개사" in th_text:
+                    for td in tds:
+                        broker_info += await td.inner_text() + "\n"
+
+        # 중개사 정보 정제
+        broker_info = clean_broker_info(broker_info)
+
+        await browser.close()
+
+        # 추출한 정보 출력
+        for key, value in info.items():
+            print(f"{key}: {value}")
+
+        # 중개사 정보 출력
+        print(f"중개사 정보: {broker_info}")
+
+if __name__ == "__main__":
+    url = "https://new.land.naver.com/complexes/22627?ms=37.5081563,127.0862943,15&a=OPST:OBYG:PRE:APT&b=B2&e=RETAIL&i=99&articleNo=2443281623"
+    asyncio.run(test_scrape_property_info(url))

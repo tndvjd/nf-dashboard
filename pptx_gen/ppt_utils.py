@@ -2,24 +2,25 @@
 PPT 조작 관련 유틸리티 함수들
 
 이 모듈은 PPT 생성과 관련된 다양한 유틸리티 함수들을 포함합니다.
+테스트 폴더의 슬라이드 복제 기능을 통합했습니다.
 """
-from pptx import Presentation # Presentation은 여기서 직접 사용 안 함 (필요시 사용)
+from pptx import Presentation
 from pptx.util import Inches, Pt
-from pptx.enum.shapes import MSO_SHAPE_TYPE # MSO_SHAPE_TYPE은 여기서 직접 사용 안 함
-from pptx.dml.color import RGBColor # RGBColor는 여기서 직접 사용 안 함
-from pptx.enum.text import PP_ALIGN # PP_ALIGN은 여기서 직접 사용 안 함
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.text.text import TextFrame
-from typing import Optional
+from typing import Optional, Tuple, Dict, Any
 import re
 import requests
 from io import BytesIO
+import six
+from copy import deepcopy
 
 def replace_text_in_frame(shape_or_cell_or_frame,
-                          old_text_pattern: str,
-                          new_text: str,
-                          font_name: Optional[str] = None,
-                          font_size: Optional[int] = None,
-                          is_bold: Optional[bool] = None):
+                         old_text_pattern: str,
+                         new_text: str,
+                         font_name: Optional[str] = None,
+                         font_size: Optional[int] = None,
+                         is_bold: Optional[bool] = None):
     """
     텍스트 프레임 내의 텍스트를 대체하고, 지정된 폰트 스타일을 적용합니다.
     old_text_pattern이 빈 문자열("")이면 전체 텍스트를 new_text로 교체하고 스타일을 적용합니다.
@@ -46,7 +47,6 @@ def replace_text_in_frame(shape_or_cell_or_frame,
             print(f"[ERROR replace_text_in_frame] Invalid regex pattern from old_text_pattern '{old_text_pattern}': {e}")
             return # 패턴이 유효하지 않으면 더 이상 진행 불가
 
-
     for paragraph_idx, paragraph in enumerate(text_frame.paragraphs):
         current_new_text = str(new_text) if new_text is not None else ""
         text_changed = False
@@ -69,18 +69,7 @@ def replace_text_in_frame(shape_or_cell_or_frame,
             paragraph.text = current_new_text
             text_changed = True
 
-
-        # 스타일 적용 (텍스트가 변경되었거나, 플레이스홀더가 비어있었거나, 혹은 플레이스홀더와 텍스트가 같지만 스타일만 적용해야 하는 경우)
-        # 위 조건에서 text_changed가 True이거나, old_text_pattern == "" 이거나, (old_text_pattern and old_text_pattern == current_new_text)
-        # 좀 더 간단하게는, placeholder가 있거나, 없더라도 첫번째 단락이면 스타일 적용 시도.
-        # 여기서는 paragraph.runs를 순회하며 각 run에 스타일을 적용하는 것이 더 정교할 수 있으나,
-        # 현재 코드는 paragraph.clear() 후 add_run() 하는 방식이 아니므로,
-        # paragraph의 모든 run에 일괄 적용하거나, 첫번째 run에만 적용하는 방식을 택해야 함.
-        # 가장 일반적인 것은 단락의 첫 번째 run에 스타일을 지정하거나, 단락 전체의 기본 폰트를 설정하는 것.
-        # 여기서는 단락의 모든 run에 스타일을 적용 시도 (템플릿에서 여러 run으로 나뉘어 있을 수 있음)
-
-        # paragraph.clear()와 add_run()을 사용하지 않고, 기존 run들의 스타일을 최대한 보존하면서
-        # 요청된 폰트 속성만 변경하는 방식
+        # 스타일 적용
         for run in paragraph.runs:
             if run.font:
                 if font_name:
@@ -91,10 +80,9 @@ def replace_text_in_frame(shape_or_cell_or_frame,
                     run.font.bold = is_bold
 
         if text_changed:
-             print(f"[DEBUG Style] Text SET and Applied Style (Font: {font_name or 'Default'}, Size: {font_size or 'Default'}pt, Bold: {is_bold if is_bold is not None else 'Default'}) for '{current_new_text[:30]}...'")
-        elif old_text_pattern_re and old_text_pattern_re.search(paragraph.text): # 텍스트 변경은 없었지만 패턴이 존재하여 스타일만 적용된 경우
-             print(f"[DEBUG Style] Style ONLY Applied (Font: {font_name or 'Default'}, Size: {font_size or 'Default'}pt, Bold: {is_bold if is_bold is not None else 'Default'}) for existing text matching '{old_text_pattern[:30]}...'")
-
+            print(f"[DEBUG Style] Text SET and Applied Style (Font: {font_name or 'Default'}, Size: {font_size or 'Default'}pt, Bold: {is_bold if is_bold is not None else 'Default'}) for '{current_new_text[:30]}...'")
+        elif old_text_pattern_re and old_text_pattern_re.search(paragraph.text): 
+            print(f"[DEBUG Style] Style ONLY Applied (Font: {font_name or 'Default'}, Size: {font_size or 'Default'}pt, Bold: {is_bold if is_bold is not None else 'Default'}) for existing text matching '{old_text_pattern[:30]}...'")
 
 def find_shape_by_placeholder_or_name(slide, identifier: str, is_placeholder_search: bool, slide_idx_for_log: int):
     """슬라이드에서 플레이스홀더 또는 이름으로 도형을 찾습니다."""
@@ -122,17 +110,13 @@ def find_shape_by_placeholder_or_name(slide, identifier: str, is_placeholder_sea
                                 return cell
     else: # 이름으로 검색
         try:
-            # 이름으로 도형을 찾는 것은 slide.shapes.get_by_name()이 더 효율적일 수 있으나,
-            # 현재 코드는 순회를 사용하고 있으므로, 일관성을 위해 유지하거나 get_by_name()으로 변경 고려.
-            # 여기서는 get_by_name을 사용하는 것이 좋음.
             shape_by_name = slide.shapes.get_by_name(identifier)
             print(f"[DEBUG][Slide {slide_idx_for_log+1}] Shape found by name '{identifier}': type={shape_by_name.shape_type}")
             return shape_by_name
-        except KeyError: # get_by_name 사용 시 도형을 찾지 못하면 KeyError 발생
-            pass # 다음 경고 메시지로 넘어감
-        except Exception as e: # 기타 예외 처리
+        except KeyError: 
+            pass
+        except Exception as e: 
             print(f"[ERROR find_shape_by_placeholder_or_name] Error finding shape by name '{identifier}': {e}")
-
 
     print(f"[WARNING][Slide {slide_idx_for_log+1}] Shape with identifier '{identifier}' (search_mode: {'placeholder' if is_placeholder_search else 'name'}) not found. Skipping.")
     return None
@@ -144,7 +128,6 @@ def normalize_url(url: str, base_domain: str = "https://image.neonet.co.kr") -> 
     if url.startswith("//"):
         return "https:" + url
     if url.startswith("/"):
-        # base_domain이 /로 끝나고 url이 /로 시작하면 중복될 수 있으므로 처리
         base = base_domain.rstrip('/')
         lpath = url.lstrip('/')
         return f"{base}/{lpath}"
@@ -158,25 +141,16 @@ def add_image_from_url(slide, image_url: str, left: float, top: float, width: Op
             return None
 
         normalized_url = normalize_url(image_url)
-        if not normalized_url: # 정규화 후에도 비어있으면 스킵
-             print("[WARNING] Normalized image URL is empty. Skipping.")
-             return None
+        if not normalized_url:
+            print("[WARNING] Normalized image URL is empty. Skipping.")
+            return None
 
         print(f"[DEBUG add_image_from_url] Downloading image from: {normalized_url}")
 
         response = requests.get(normalized_url, timeout=10)
-        response.raise_for_status() # HTTP 오류 발생 시 예외 발생
+        response.raise_for_status()
 
         image_stream = BytesIO(response.content)
-
-        # add_picture에는 EMU 단위가 필요. Inches()는 인치를 EMU로 변환.
-        # 따라서 left, top, width, height는 인치 단위로 전달되어야 함.
-        # create_ppt_file에서 shape.left 등을 전달할 때 EMU 단위이므로, 이를 인치로 변환하거나,
-        # 이 함수에서 EMU를 직접 받도록 수정해야 함.
-        # 현재는 Inches()를 사용하므로, 호출부에서 인치 단위로 값을 전달한다고 가정.
-        # 만약 호출부(create_ppt_file)에서 shape_to_modify.left (EMU)를 그대로 전달하고 있다면,
-        # 여기서는 Inches()를 사용하지 않거나, 호출부에서 Inches(shape_to_modify.left).value 등으로 변환해야 함.
-        # 이 부분은 호출부와의 규약이 중요. 여기서는 일단 주어진 대로 Inches()를 사용.
         pic = slide.shapes.add_picture(image_stream, left, top, width=width, height=height)
 
         print(f"[DEBUG add_image_from_url] Image added successfully: position=({left}, {top}), size=({width}, {height}) if specified")
@@ -188,131 +162,112 @@ def add_image_from_url(slide, image_url: str, left: float, top: float, width: Op
         print(f"[ERROR add_image_from_url] Failed to add image for URL '{image_url}': {e}")
     return None
 
+def apply_text_to_shape(shape, text_content: str, font_name: Optional[str] = None, font_size: Optional[int] = None, is_bold: Optional[bool] = None):
+    """
+    도형에 텍스트를 적용하고 지정된 폰트 스타일을 설정합니다.
+    기존 텍스트는 모두 삭제됩니다.
+    """
+    text_frame: Optional[TextFrame] = None
 
-def duplicate_slide(prs, template_slide_idx):
-    """Presentation의 특정 슬라이드를 복제합니다.
+    # TextFrame 가져오기 시도
+    if isinstance(shape, TextFrame):
+        text_frame = shape
+    elif hasattr(shape, 'text_frame') and shape.text_frame is not None:
+        text_frame = shape.text_frame
+    else:
+        print(f"[ERROR apply_text_to_shape] Object {type(shape)} has no text_frame.")
+        return False
+
+    if text_frame is None:
+        print("[ERROR apply_text_to_shape] Failed to get text_frame.")
+        return False
+
+    try:
+        # 기존 텍스트 전체 대체
+        text_frame.clear()  # 모든 단락 제거
+
+        # 새 단락 추가 및 스타일링
+        paragraph = text_frame.paragraphs[0]  
+        paragraph.text = text_content
+
+        # 폰트 스타일 설정
+        for run in paragraph.runs:
+            if font_name:
+                run.font.name = font_name
+            if font_size:
+                run.font.size = Pt(font_size)
+            if is_bold is not None:
+                run.font.bold = is_bold
+
+        return True
+    except Exception as e:
+        print(f"[ERROR apply_text_to_shape] Failed to apply text: {e}")
+        return False
+
+# --- 슬라이드 복제 기능 추가 ---
+def duplicate_slide(prs, index):
+    """슬라이드를 복제합니다. 이 함수는 널리 검증된 방법을 사용합니다.
     
     Args:
         prs: Presentation 객체
-        template_slide_idx: 복제할 템플릿 슬라이드 인덱스
-        
+        index: 복제할 슬라이드 인덱스
+    
     Returns:
         복제된 슬라이드 객체
     """
-    if template_slide_idx >= len(prs.slides):
-        print(f"[ERROR duplicate_slide] Template slide index {template_slide_idx} is out of range. Total slides: {len(prs.slides)}")
+    if index >= len(prs.slides):
+        print(f"[ERROR] 슬라이드 인덱스 {index}가 범위를 벗어났습니다. 총 슬라이드 수: {len(prs.slides)}")
         return None
-        
-    template_slide = prs.slides[template_slide_idx]
     
-    # 슬라이드 레이아웃 가져오기
-    slide_layout = template_slide.slide_layout
-    
-    # 레이아웃을 사용하여 새 슬라이드 추가
-    new_slide = prs.slides.add_slide(slide_layout)
-    
-    # 기존 템플릿 슬라이드의 모든 도형 및 카드 복사
-    for shape in template_slide.shapes:
-        # 템플릿 슬라이드의 도형 정보 가져오기
-        shape_type = shape.shape_type
-        left = shape.left
-        top = shape.top
-        width = shape.width
-        height = shape.height
+    try:
+        print(f"[INFO] 슬라이드 {index+1}번 복제 시작...")
+        source = prs.slides[index]
         
-        # 도형 유형에 따라 실제 객체 생성
-        if shape.has_text_frame:
-            # 텍스트 프레임 복사
-            new_shape = new_slide.shapes.add_textbox(left, top, width, height)
-            new_text_frame = new_shape.text_frame
-            
-            # 텍스트 및 서식 복사 (가능한 데까지)
-            for i, paragraph in enumerate(shape.text_frame.paragraphs):
-                if i == 0:
-                    # 첫 번째 단락은 이미 존재
-                    new_para = new_text_frame.paragraphs[0]
-                else:
-                    # 나머지 단락은 추가
-                    new_para = new_text_frame.add_paragraph()
-                
-                # 단락 내용 복사
-                new_para.text = paragraph.text
-                
-                # TODO: 더 자세한 서식 (폰트, 색상 등) 복사도 가능하지만 제한적
-                
-        elif shape.has_table:
-            try:
-                # 테이블 복사 (단순화된 구현)
-                # 행과 열 개수 추출
-                rows_count = len(shape.table.rows)
-                cols_count = len(shape.table.columns)
-                
-                print(f"[DEBUG duplicate_slide] 테이블 복사 시도: {rows_count}x{cols_count} 크기, 위치=({left}, {top}), 크기=({width}, {height})")
-                
-                # 새 테이블 추가
-                new_table = new_slide.shapes.add_table(rows_count, cols_count, left, top, width, height).table
-                
-                # 각 셀 복사
-                for r_idx in range(rows_count):
-                    for c_idx in range(cols_count):
-                        try:
-                            # 셀 내용 복사
-                            source_cell = shape.table.cell(r_idx, c_idx)
-                            text = source_cell.text_frame.text if hasattr(source_cell, 'text_frame') and source_cell.text_frame else ""
-                            new_table.cell(r_idx, c_idx).text = text
-                        except Exception as cell_err:
-                            print(f"[ERROR duplicate_slide] 테이블 셀({r_idx},{c_idx}) 복사 오류: {cell_err}")
-            except Exception as table_err:
-                print(f"[ERROR duplicate_slide] 테이블 복사 오류: {table_err}")
-                # 테이블 복사 실패 시 기본 텍스트박스로 대체
-                try:
-                    new_textbox = new_slide.shapes.add_textbox(left, top, width, height)
-                    new_textbox.text_frame.text = "[Table content could not be copied]"
-                except Exception as e:
-                    print(f"[ERROR duplicate_slide] 대체 텍스트박스 생성 실패: {e}")
-                    
-        # 이미지 처리
-        elif hasattr(shape, 'image'):
-            try:
-                # 이미지 파트 정보 추출
-                image_part = shape.image
-                image_blob = image_part.blob
-                content_type = image_part.content_type
-                
-                # 새 이미지 도형 추가
-                new_picture = new_slide.shapes.add_picture(
-                    image_blob, 
-                    left, top, 
-                    width, height
-                )
-                print(f"[DEBUG duplicate_slide] 이미지 복사 성공: {left}, {top}, {width}, {height}")
-            except Exception as e:
-                print(f"[ERROR duplicate_slide] 이미지 복사 중 오류: {e}")
-                
-        # 다른 도형 유형 처리 (예: 도형, 선, 화살표 등)
-        elif hasattr(shape, 'shape_type'):
-            try:
-                # 도형 타입 확인
-                from pptx.enum.shapes import MSO_SHAPE_TYPE
-                
-                # 직사각형 처리
-                if shape.shape_type == MSO_SHAPE_TYPE.RECTANGLE:
-                    new_shape = new_slide.shapes.add_shape(
-                        MSO_SHAPE_TYPE.RECTANGLE,
-                        left, top, width, height
-                    )
-                    # 가능한 경우 서식 복사
-                    if hasattr(shape, 'fill') and hasattr(new_shape, 'fill'):
-                        if shape.fill.type is not None:
-                            new_shape.fill.solid()
-                            if hasattr(shape.fill, 'fore_color') and hasattr(shape.fill.fore_color, 'rgb'):
-                                new_shape.fill.fore_color.rgb = shape.fill.fore_color.rgb
-                
-                # 상기 처리되지 않은 도형은 오류 로그만 작성
-                else:
-                    print(f"[INFO duplicate_slide] 지원하지 않는 도형 타입: {shape.shape_type}")
-            except Exception as e:
-                print(f"[ERROR duplicate_slide] 도형 복사 중 오류: {e}")
+        # 대상 슬라이드의 XML 표현을 가져옵니다
+        slide_xml = source.element
         
-    print(f"[INFO duplicate_slide] Successfully duplicated slide at index {template_slide_idx}")
-    return new_slide
+        # 새 슬라이드 생성을 위한 XML 요소를 복제합니다
+        new_slide_xml = deepcopy(slide_xml)
+        
+        # 복제된 슬라이드 XML을 프레젠테이션에 추가합니다
+        # 복제된 슬라이드는 원본 후에 바로 추가됩니다
+        # 상위 슬라이드 목록에서 삽입할 위치 찾기
+        slide_collection = source.part.package.presentation_part.presentation.sldIdLst
+        slide_id_list = [x for x in slide_collection]
+        
+        # 원본 슬라이드 다음에 새 슬라이드를 삽입
+        new_slide_part = prs.part.package.presentation_part.new_slide_part(slide_xml)
+        
+        # 슬라이드 ID 생성
+        rel_id = prs.part.package.presentation_part.relate_to(new_slide_part)
+        
+        # 새 슬라이드 ID 요소 생성 (ID 지정)
+        new_slide_id = slide_collection._add_sldId(rel_id)
+        
+        # 원본 슬라이드 다음에 삽입
+        for i, s in enumerate(slide_id_list):
+            if s.rId == source.part.rId:
+                slide_collection._insert_sldId(i+1, new_slide_id)
+                break
+        
+        # 복제된 슬라이드 가져오기
+        duplicate_slide = prs.slides[-1]  # 방금 추가된 슬라이드
+        
+        # 슬라이드 관계 복사
+        for rel_id, rel in six.iteritems(source.part.rels):
+            # 이미 복사된 관계 건너뛰기
+            if rel.is_external or rel.reltype == duplicate_slide.part.reltype:
+                continue
+                
+            # Target parts (이미지, 차트 등)를 새 슬라이드에 복사
+            if hasattr(rel.target_part, 'partname'):
+                duplicate_slide.part.relate_to(rel.target_part, rel.reltype)
+        
+        print(f"[INFO] 슬라이드 {index+1}번 복제 완료. 슬라이드 인덱스: {prs.slides.index(duplicate_slide)+1}")
+        return duplicate_slide
+    
+    except Exception as e:
+        import traceback
+        print(f"[ERROR] 슬라이드 복제 중 오류가 발생했습니다: {e}")
+        traceback.print_exc()
+        return None
