@@ -4,10 +4,10 @@ from pptx.util import Inches, Pt
 import datetime
 import math
 from io import BytesIO
+import copy # Added for deepcopy, though not used in the primary clone_slide logic directly
 # import requests # 실제 이미지 로드 시 주석 해제
 # from io import BytesIO # 실제 이미지 로드 시 주석 해제
 
-TEMPLATE_PATH = "ppt_template.pptx" # FastAPI에서는 이 경로를 어떻게 처리할지 고려 필요 (예: 설정 파일, 환경 변수)
 IMAGE_BASE_URL = "https://land.naver.com"
 
 # --- 매핑 규칙 정의 ---
@@ -100,16 +100,18 @@ def format_date_yyyy_mm(value, data_dict=None, json_path=None):
 def calculate_pyeong(m2_value, precision=1):
     if isinstance(m2_value, (int, float)) and m2_value > 0:
         return round(m2_value / 3.3058, precision)
-    return ""
+    # return "" # This line is unreachable and can be removed if it exists.
 
 def format_property_title_text(values, data_dict=None, json_path=None):
-    prop_order = "1"
+    # data_dict is expected to contain "매물순번" for dynamic numbering.
+    prop_order = data_dict.get("매물순번", "N/A") if data_dict else "N/A"
     div_name = values[0] if len(values) > 0 and values[0] else ""
     apt_name = values[1] if len(values) > 1 and values[1] else ""
     return f"No.{prop_order} [{div_name}] {apt_name}"
 
 def get_property_order(value=None, data_dict=None, json_path=None):
-    return "1"
+    # data_dict is expected to contain "매물순번" for dynamic page numbering.
+    return data_dict.get("매물순번", "1") if data_dict else "1"
 
 def format_household_count(value, data_dict=None, json_path=None):
     return f"{value}세대" if value else ""
@@ -449,211 +451,152 @@ def clone_slide(prs, slide_index):
     
     return new_slide
 
-# --- 메인 PPTX 생성 로직 ---
-def generate_presentation_logic(client_data: dict, article_json_data: dict, 매핑규칙: dict):
-    prs = Presentation(TEMPLATE_PATH)
-    # print(f"템플릿 파일 '{TEMPLATE_PATH}' 로드 완료.")
-
-    # 슬라이드 1 (표지) 채우기
-    slide1 = prs.slides[0]
-    for shape_name, mapping_value in 매핑규칙.items():
-        if shape_name not in ["txt_document_title", "txt_client_name", "txt_company_name"]:
+# --- 표지 슬라이드 채우기 함수 ---
+def fill_cover_slide_data(slide, document_info, mappings_config):
+    """
+    표지 슬라이드의 내용을 채웁니다.
+    Args:
+        slide: 채울 슬라이드 객체
+        document_info: 문서 정보 (client_data와 유사, "문서명", "고객명" 등 포함)
+        mappings_config: 전체 매핑 규칙
+    """
+    print(f"[DEBUG] fill_cover_slide_data 호출됨. 슬라이드 ID: {slide.slide_id if slide else 'None'}, 문서명: {document_info.get('문서명', 'N/A')}")
+    
+    cover_slide_shape_keys = ["txt_document_title", "txt_client_name", "txt_company_name"]
+    
+    for shape_name in cover_slide_shape_keys:
+        if shape_name not in mappings_config:
+            print(f"[WARNING] 표지 매핑 '{shape_name}'이(가) 전체 매핑 규칙에 없습니다.")
             continue
 
-        if not (isinstance(mapping_value, tuple) and len(mapping_value) == 4):
+        mapping_details = mappings_config[shape_name]
+        if not (isinstance(mapping_details, tuple) and len(mapping_details) == 4):
+            print(f"[WARNING] 표지 매핑 값 '{shape_name}'의 형식이 올바르지 않습니다.")
             continue
         
-        placeholder_or_cell_coord, json_key, func_name, font_details = mapping_value
-        shape_to_fill = find_shape_by_name(slide1, shape_name)
-        if not shape_to_fill:
+        placeholder_or_cell_coord, data_key, helper_func_name, font_details = mapping_details
+        
+        target_shape = find_shape_by_name(slide, shape_name)
+        if not target_shape:
+            print(f"[WARNING] 표지 슬라이드에서 '{shape_name}' 도형을 찾을 수 없습니다.")
             continue
 
-        value_to_insert = client_data.get(json_key, f"키 '{json_key}' 없음")
+        raw_value = document_info.get(data_key, f"키 '{data_key}' 없음")
 
-        if shape_name == "txt_client_name":
-            if shape_to_fill.has_table:
-                table = shape_to_fill.table
-                if table.cell(placeholder_or_cell_coord[0], placeholder_or_cell_coord[1]):
-                    set_cell_text(table.cell(placeholder_or_cell_coord[0], placeholder_or_cell_coord[1]), value_to_insert, font_details)
-        elif shape_to_fill.has_text_frame:
-            replace_text_in_shape(shape_to_fill, placeholder_or_cell_coord, value_to_insert, font_details)
-
-    # 슬라이드 2 (첫 번째 매물) 채우기
-    slide2 = prs.slides[1]
-    
-    # 매물 데이터 채우기를 위한 함수 정의
-    def fill_property_data(slide, article_data, client_data, mapping_rules):
-        # --- 슬라이드 텍스트 및 이미지 채우기 ---
-        tables_to_fill = ["tbl_complex_info", "tbl_property_detail_1", "tbl_property_detail_2"]
-        for table_name in tables_to_fill:
-            table_shape = find_shape_by_name(slide, table_name)
-            if table_shape and table_shape.has_table and table_name in mapping_rules:
-                fill_table_from_mappings(table_shape, mapping_rules[table_name], article_data, client_data)
-
-        # --- 슬라이드 이미지 채우기 (실제 로드는 주석 처리됨) ---
-        image_shapes_to_fill = ["img_complex_view", "img_complex_floorplan", "img_complex_mapimg"]
-        for img_shape_name in image_shapes_to_fill:
-            if img_shape_name in mapping_rules:
-                _, img_json_path, img_func_name, _ = mapping_rules[img_shape_name]
-                img_shape = find_shape_by_name(slide, img_shape_name)
-                img_func = helper_functions.get(img_func_name)
-                if img_shape and img_func:
-                    img_url = img_func(get_nested_value(article_data, img_json_path), article_data, img_json_path)
-                    if img_url:
-                        # 실제 이미지 로드 (주석 처리됨)
-                        # print(f"이미지 로드 시도: {img_url}")
-                        # add_image_to_shape(img_shape, img_url)
-                        pass
-    
-    # 제목 업데이트: 첫 번째 매물 정보 업데이트 (슬라이드 2)    
-    title_shape = find_shape_by_name(slide2, "txt_property_title")
-    if title_shape and title_shape.has_table:
-        div_name = get_nested_value(article_json_data, "articleDetail.divisionName", "")
-        apt_name = get_nested_value(article_json_data, "articleDetail.aptName", "")
-        title_text = f"No.1 [{div_name}] {apt_name}"
-        cell = title_shape.table.cell(0, 0)
-        set_cell_text(cell, title_text, {"font_name": "나눔고딕", "font_size": Pt(18)})
-    
-    # 페이지 번호 업데이트
-    page_shape = find_shape_by_name(slide2, "txt_property_page")
-    if page_shape:
-        replace_text_in_shape(page_shape, None, "1", {"font_name": "나눔고딕", "font_size": Pt(10)})
+        final_value = raw_value
+        if helper_func_name and helper_func_name in helper_functions:
+            try:
+                final_value = helper_functions[helper_func_name](raw_value, document_info, data_key)
+            except Exception as e:
+                print(f"[ERROR] 표지 데이터에 헬퍼 함수 '{helper_func_name}' 적용 중 오류: {e}")
+                final_value = "오류"
         
-    # 슬라이드 2 데이터 채우기
-    fill_property_data(slide2, article_json_data, client_data, 매핑규칙)
+        if shape_name == "txt_client_name": # 특정 테이블 셀 처리 예시
+            if target_shape.has_table and isinstance(placeholder_or_cell_coord, tuple) and len(placeholder_or_cell_coord) == 2:
+                row_idx, col_idx = placeholder_or_cell_coord
+                if row_idx < len(target_shape.table.rows) and col_idx < len(target_shape.table.columns):
+                    set_cell_text(target_shape.table.cell(row_idx, col_idx), final_value, font_details)
+                else:
+                    print(f"[WARNING] '{shape_name}' 테이블에 ({row_idx},{col_idx}) 셀이 없습니다.")
+            else:
+                print(f"[WARNING] '{shape_name}' 도형은 테이블이 아니거나 셀 좌표가 부적절합니다.")
+        elif target_shape.has_text_frame:
+            replace_text_in_shape(target_shape, placeholder_or_cell_coord, final_value, font_details)
+        else:
+            print(f"[WARNING] '{shape_name}' 도형에 텍스트 프레임이 없습니다.")
+    print(f"[DEBUG] fill_cover_slide_data 완료.")
 
-    # 추가 매물 데이터 샘플 (실제로는 API 요청에서 받아올 수 있음)
-    additional_article_data = [
-        {
-            "articleDetail": {
-                "divisionName": "아파트",
-                "aptName": "래미안 퍼스티지",
-                "exposureAddress": "서울특별시 강남구 신사동 123-45",
-                "aptUseApproveYmd": "20150312",
-                "aptHouseholdCount": "320",
-                "aptHeatMethodTypeName": "개별난방",
-                "aptHeatFuelTypeName": "도시가스",
-                "buildingName": "101동",
-                "roomCount": "3",
-                "bathroomCount": "2",
-                "moveInTypeName": "즉시 입주 가능",
-                "articleFeatureDescription": "신사역 도보 5분 거리, 리모델링 완료된 남향 코너 호실",
-                "detailDescription": "채광 좋은 거실, 입주 즉시 가능한 깔끔한 아파트입니다.",
-                "tagList": ["남향", "역세권", "반려동물 가능", "신규 등록"],
-                "grandPlanList": [{
-                    "imageSrc": "/타입1_평면도.jpg", 
-                    "imageType": "PLAN"
-                }],
-                "latitude": "37.5167",
-                "longitude": "127.0402"
-            },
-            "articleAddition": {
-                "floorInfo": "12/15",
-                "direction": "남향",
-                "dealOrWarrantPrc": "25000",
-                "rentPrc": "120",
-                "representativeImgUrl": "/매물사진2.jpg"
-            },
-            "articleFloor": {
-                "totalFloorCount": "15",
-                "buildingHighestFloor": "15"
-            },
-            "articlePrice": {
-                "warrantPrice": 25000,
-                "rentPrice": 120
-            },
-            "articleSpace": {
-                "supplySpace": 112.32,
-                "exclusiveSpace": 84.83
-            },
-            "articlePhotos": [
-                {"imageSrc": "/매물사진2_1.jpg", "imageType": "INTERNAL"},
-                {"imageSrc": "/매물사진2_2.jpg", "imageType": "INTERNAL"}
-            ],
-            "administrationCostInfo": {
-                "chargeCodeType": "INCLUDE_ALL"
-            },
-            "참고사항_입력": "관리비에 수도/전기/가스 포함",
-            "비고_입력": "주차 2대 가능"
-        },
-        {
-            "articleDetail": {
-                "divisionName": "오피스텔",
-                "aptName": "센트럴파크 타워",
-                "exposureAddress": "서울특별시 강남구 역삼동 789-10",
-                "aptUseApproveYmd": "20180525",
-                "aptHouseholdCount": "192",
-                "aptHeatMethodTypeName": "중앙난방",
-                "aptHeatFuelTypeName": "지역난방",
-                "buildingName": "A동",
-                "roomCount": "2",
-                "bathroomCount": "1",
-                "moveInTypeName": "2개월 후 입주 가능",
-                "articleFeatureDescription": "역삼역 초역세권, 풀옵션 신축급 오피스텔",
-                "detailDescription": "2년 계약 시 중개수수료 할인 가능합니다.",
-                "tagList": ["풀옵션", "신축", "주차가능", "24시간 보안"],
-                "grandPlanList": [{
-                    "imageSrc": "/타입2_평면도.jpg", 
-                    "imageType": "PLAN"
-                }],
-                "latitude": "37.5006",
-                "longitude": "127.0359"
-            },
-            "articleAddition": {
-                "floorInfo": "8/18",
-                "direction": "동향",
-                "dealOrWarrantPrc": "15000",
-                "rentPrc": "90",
-                "representativeImgUrl": "/매물사진3.jpg"
-            },
-            "articleFloor": {
-                "totalFloorCount": "18",
-                "buildingHighestFloor": "18"
-            },
-            "articlePrice": {
-                "warrantPrice": 15000,
-                "rentPrice": 90
-            },
-            "articleSpace": {
-                "supplySpace": 63.6,
-                "exclusiveSpace": 45.5
-            },
-            "articlePhotos": [
-                {"imageSrc": "/매물사진3_1.jpg", "imageType": "INTERNAL"},
-                {"imageSrc": "/매물사진3_2.jpg", "imageType": "INTERNAL"}
-            ],
-            "administrationCostInfo": {
-                "chargeCodeType": "INCLUDE_PART"
-            },
-            "참고사항_입력": "보안키 및 디지털 도어락 설치",
-            "비고_입력": "공용 사우나, 피트니스센터 이용 가능"
-        }
-    ]
-    
-    # 추가 매물 정보 슬라이드 생성
-    for idx, additional_data in enumerate(additional_article_data, start=1):
-        # 슬라이드 2를 복제하여 새 슬라이드 생성
-        new_slide = clone_slide(prs, 1)  # 슬라이드 인덱스 1을 복제 (0부터 시작하므로 인덱스 1은 두 번째 슬라이드임)
+# --- 매물 정보 슬라이드 채우기 함수 ---
+def fill_property_data(slide, article_json_data, client_data, mappings_config):
+    """
+    단일 매물 정보 슬라이드의 내용을 채웁니다.
+    Args:
+        slide: 채울 슬라이드 객체
+        article_json_data: 특정 매물에 대한 JSON 데이터 (반드시 "매물순번" 키 포함)
+        client_data: 고객 및 문서 정보 (참고사항, 비고 등에 사용될 수 있음)
+        mappings_config: 전체 매핑 규칙
+    """
+    property_order_str = str(article_json_data.get("매물순번", "N/A"))
+    print(f"[DEBUG] fill_property_data 호출됨. 슬라이드 ID: {slide.slide_id if slide else 'None'}, 매물순번: {property_order_str}")
 
-        # 슬라이드 번호 변경 (매물 순번)
-        prop_title_shape = find_shape_by_name(new_slide, "txt_property_title")
-        if prop_title_shape and prop_title_shape.has_table:
-            # 매물 번호 증가
-            div_name = get_nested_value(additional_data, "articleDetail.divisionName", "")
-            apt_name = get_nested_value(additional_data, "articleDetail.aptName", "")
-            new_title = f"No.{idx+1} [{div_name}] {apt_name}"
-            set_cell_text(prop_title_shape.table.cell(0, 0), new_title, {"font_name": "나눔고딕", "font_size": Pt(18)})
-        
-        # 매물 페이지 번호 업데이트
-        page_shape = find_shape_by_name(new_slide, "txt_property_page")
-        if page_shape:
-            replace_text_in_shape(page_shape, None, str(idx+1), {"font_name": "나눔고딕", "font_size": Pt(10)})
-        
-        # 복제된 슬라이드에 새로운 추가 데이터 적용
-        fill_property_data(new_slide, additional_data, client_data, 매핑규칙)
+    # 제목 업데이트 (txt_property_title)
+    title_shape_key = "txt_property_title"
+    if title_shape_key in mappings_config:
+        title_shape = find_shape_by_name(slide, title_shape_key)
+        if title_shape:
+            # format_property_title_text 헬퍼 함수를 사용하기 위해 article_json_data 전달
+            _, data_keys, helper_name, font = mappings_config[title_shape_key]
+            if helper_name == 'format_property_title_text' and isinstance(data_keys, list):
+                values_for_helper = [get_nested_value(article_json_data, dk) for dk in data_keys]
+                # 헬퍼 함수가 article_json_data 내의 "매물순번"을 참조하도록 수정했으므로, data_dict로 article_json_data 전달
+                title_text = helper_functions[helper_name](values_for_helper, article_json_data, data_keys)
+                if title_shape.has_table: # 제목이 테이블 셀 안에 있는 경우
+                     coord = mappings_config[title_shape_key][0] # (row, col)
+                     set_cell_text(title_shape.table.cell(coord[0], coord[1]), title_text, font)
+                elif title_shape.has_text_frame: # 일반 텍스트 박스
+                     replace_text_in_shape(title_shape, None, title_text, font)
+        else:
+            print(f"[WARNING] 매물 제목 도형 '{title_shape_key}'을(를) 슬라이드에서 찾을 수 없습니다.")
+
+    # 페이지 번호 업데이트 (txt_property_page)
+    page_shape_key = "txt_property_page"
+    if page_shape_key in mappings_config:
+        page_shape = find_shape_by_name(slide, page_shape_key)
+        if page_shape and page_shape.has_text_frame:
+            # get_property_order 헬퍼 함수가 article_json_data 내의 "매물순번"을 사용하도록 수정됨
+            _, _, helper_name, font = mappings_config[page_shape_key]
+            # page_text_val = helper_functions[helper_name](None, article_json_data, None)
+            # replace_text_in_shape(page_shape, None, page_text_val, font)
+            # 직접 매물 순번 사용 (get_property_order 헬퍼는 이제 article_json_data["매물순번"]을 반환)
+            replace_text_in_shape(page_shape, None, property_order_str, font)
+        else:
+            print(f"[WARNING] 매물 페이지번호 도형 '{page_shape_key}'을(를) 찾을 수 없거나 텍스트 프레임이 없습니다.")
+
+    # 테이블들 채우기
+    table_keys = ["tbl_complex_info", "tbl_property_detail_1", "tbl_property_detail_2"]
+    for table_key in table_keys:
+        if table_key in mappings_config:
+            table_shape = find_shape_by_name(slide, table_key)
+            if table_shape and table_shape.has_table:
+                fill_table_from_mappings(table_shape, mappings_config[table_key], article_json_data, client_data)
+            else:
+                print(f"[WARNING] 테이블 도형 '{table_key}'을(를) 찾을 수 없거나 테이블이 아닙니다.")
     
-    # 결과물 반환
-    ppt_buffer = BytesIO()
-    prs.save(ppt_buffer)
-    ppt_buffer.seek(0)
-    return ppt_buffer
+    # 이미지들 채우기
+    image_keys = ["img_complex_view", "img_complex_floorplan", "img_complex_mapimg"]
+    for img_key in image_keys:
+        if img_key in mappings_config:
+            img_shape = find_shape_by_name(slide, img_key)
+            if img_shape:
+                _, data_key_or_list, helper_name, _ = mappings_config[img_key]
+                img_value_for_helper = get_nested_value(article_json_data, data_key_or_list)
+                
+                final_image_src_or_placeholder = img_value_for_helper # 기본값
+                if helper_name and helper_name in helper_functions:
+                    try:
+                        # 헬퍼 함수는 (value, data_dict, json_path) 시그니처를 따름
+                        final_image_src_or_placeholder = helper_functions[helper_name](img_value_for_helper, article_json_data, data_key_or_list)
+                    except Exception as e_img_helper:
+                        print(f"[ERROR] 이미지 헬퍼 함수 '{helper_name}' 실행 중 오류: {e_img_helper}")
+                        final_image_src_or_placeholder = "이미지 오류"
+
+                if final_image_src_or_placeholder:
+                    if "지도 이미지 생성 필요" in str(final_image_src_or_placeholder) or \
+                       "위경도 정보 없음" in str(final_image_src_or_placeholder) or \
+                       "이미지 오류" in str(final_image_src_or_placeholder):
+                        # 이미지 대신 플레이스홀더 텍스트 표시
+                        if img_shape.has_text_frame:
+                             replace_text_in_shape(img_shape, None, final_image_src_or_placeholder, {"font_name": "나눔고딕", "font_size": Pt(8)})
+                        else: # 텍스트 프레임이 없는 경우 도형에 직접 추가 시도 (add_textbox_to_shape 같은 함수 필요)
+                             print(f"[INFO] '{img_key}' 도형에 이미지 플레이스홀더 텍스트 '{final_image_src_or_placeholder}' 표시 시도 (텍스트 프레임 없음)")
+                    else:
+                        # 실제 이미지 로드 및 추가 로직 (현재 주석 처리)
+                        # add_image_to_shape(img_shape, final_image_src_or_placeholder)
+                        print(f"[INFO] 이미지 로드 대상: {img_key} <- {final_image_src_or_placeholder} (실제 로드는 주석 처리됨)")
+                        # 임시로 이미지 경로를 텍스트로 표시 (디버깅용)
+                        if img_shape.has_text_frame:
+                            replace_text_in_shape(img_shape, None, str(final_image_src_or_placeholder), {"font_name": "나눔고딕", "font_size": Pt(8)})
+
+            else:
+                print(f"[WARNING] 이미지 도형 '{img_key}'을(를) 슬라이드에서 찾을 수 없습니다.")
+    print(f"[DEBUG] fill_property_data 완료.")

@@ -14,22 +14,74 @@ import os
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
-    from ppt_logic import clone_slide, generate_presentation_logic
+    from ppt_logic import clone_slide, generate_presentation_logic, fill_property_data, mappings as ppt_logic_mappings
+    # fill_cover_slide_data는 ppt_logic.py에 있다고 가정합니다.
+    # 실제로는 generate_presentation_logic의 일부이거나, fill_property_data를 특정 매개변수와 함께 사용할 수 있습니다.
+    # 여기서는 fill_cover_slide_data가 존재한다고 가정하고 진행합니다.
+    # 만약 없다면, 이 부분을 수정하거나 ppt_logic.py에 해당 함수를 추가해야 합니다.
+    from ppt_logic import fill_cover_slide_data # 임시 가정
 except ImportError:
-    print("[ERROR] ppt_logic 모듈을 찾을 수 없습니다. 경로를 확인하세요.")
+    print("[ERROR] ppt_logic 모듈 또는 필요한 함수를 찾을 수 없습니다. 경로와 파일 내용을 확인하세요.")
     print(f"현재 Python 경로: {sys.path}")
-    # 대체 구현 시도
+    # 대체 구현 시도 (개발 및 테스트용)
     from pptx import Presentation
     
     def clone_slide(prs, index):
         print("[WARNING] 대체 구현된 clone_slide 함수를 사용합니다.")
-        return prs.slides[index]
-        
+        # 실제 복제 로직이 필요합니다. 아래는 단순 참조 반환으로, 실제 PPT에는 새 슬라이드가 추가되지 않습니다.
+        # return prs.slides.add_slide(prs.slides[index].slide_layout) # 좀 더 나은 대체
+        if index < len(prs.slides):
+            source = prs.slides[index]
+            image_dict = {}
+            # 이미지를 BytesIO로 저장
+            for shape in source.shapes:
+                if shape.shape_type == MSO_SHAPE_TYPE.PICTURE: # 13은 그림 유형
+                    try:
+                        image_bytes = BytesIO(shape.image.blob)
+                        image_dict[shape.name] = image_bytes
+                    except Exception: # blob 접근이 항상 가능하지 않을 수 있음
+                        pass
+
+
+            new_slide = prs.slides.add_slide(source.slide_layout)
+            for shp in source.shapes:
+                el = shp.element
+                new_el = copy.deepcopy(el)
+                new_slide.shapes._spTree.insert_element_before(new_el, 'p:extLst')
+                
+                # 이미지 재연결 (필요한 경우)
+                if shp.name in image_dict:
+                    try:
+                        new_shape = new_slide.shapes[-1] # 방금 추가된 도형
+                        if new_shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                             new_slide.shapes.add_picture(image_dict[shp.name], new_shape.left, new_shape.top, new_shape.width, new_shape.height)
+                             # 원래 도형 제거 또는 이미지로 대체하는 로직 추가 필요
+                    except Exception as e_img:
+                        print(f"Error re-adding image {shp.name}: {e_img}")
+            return new_slide
+        return prs.slides.add_slide(prs.slide_layouts[0]) # 기본 레이아웃으로 추가
+
+
     def generate_presentation_logic(client_data, article_json_data, mappings=None, template_path=None, output_path=None):
         print("[WARNING] 대체 구현된 generate_presentation_logic 함수를 사용합니다.")
         prs = Presentation(template_path)
+        # 여기에 실제 데이터 채우기 로직이 필요합니다.
         prs.save(output_path)
         return output_path
+
+    def fill_property_data(slide, article_json, client_data, mappings):
+        print(f"[WARNING] 대체 구현된 fill_property_data 호출됨 - 슬라이드 '{slide.slide_id}'에 대해 데이터 채우기 시뮬레이션")
+        # 이 함수는 실제 ppt_logic.py의 구현을 따라야 합니다.
+        # 예시: slide.shapes[0].text_frame.text = article_json.get("매물순번", "") + " " + article_json.get("articleDetail",{}).get("aptName","")
+        pass
+
+    def fill_cover_slide_data(slide, document_info, mappings):
+        print(f"[WARNING] 대체 구현된 fill_cover_slide_data 호출됨 - 슬라이드 '{slide.slide_id}'에 대해 표지 데이터 채우기 시뮬레이션")
+        # 이 함수는 실제 ppt_logic.py의 구현을 따라야 합니다.
+        # 예시: slide.shapes[0].text_frame.text = document_info.get("문서명", "")
+        pass
+        
+    ppt_logic_mappings = {} # 대체 매핑
 
 # 기존 코드와의 호환성 유지를 위한 경로 설정
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -182,105 +234,102 @@ def create_ppt_file_multi(properties_data: List[Dict], document_info: Dict, map_
     except Exception as e:
         print(f"[ERROR] Failed to load PPT template: {template_filepath}. Error: {e}")
         raise e
-    
-    # 첫 번째 매물 데이터를 이용해 문서 표지 슬라이드 생성
-    if properties_data and len(properties_data) > 0:
-        first_property = properties_data[0]
-        
-        # 첫 번째 매물로 표지 슬라이드 구성
-        first_article_json_data = {}
-        
-        # 매물 상세 정보
-        if "articleDetail" in first_property:
-            first_article_json_data.update(first_property.get("articleDetail", {}))
-        
-        # 추가 정보
-        if "articleAddition" in first_property:
-            first_article_json_data["articleAddition"] = first_property.get("articleAddition", {})
-        
-        # 매물 가격 정보
-        if "articlePrice" in first_property:
-            first_article_json_data["articlePrice"] = first_property.get("articlePrice", {})
-        
-        # ppt_logic의 generate_presentation_logic 함수 호출하여 첫 매물로 표지 슬라이드 구성
+
+    # 표지 슬라이드 (prs.slides[0]) 채우기
+    try:
+        print("[INFO] 표지 슬라이드 데이터 채우기 시작")
+        # fill_cover_slide_data 함수가 ppt_logic.py에 정의되어 있다고 가정합니다.
+        # 이 함수는 client_data와 ppt_logic_mappings를 사용하여 표지 슬라이드의 내용을 채웁니다.
+        if len(prs.slides) > 0:
+            fill_cover_slide_data(prs.slides[0], client_data, ppt_logic_mappings) 
+            print("[INFO] 표지 슬라이드 데이터 채우기 완료")
+        else:
+            print("[ERROR] 템플릿에 슬라이드가 없습니다. 표지 슬라이드를 채울 수 없습니다.")
+            # 오류 처리를 하거나, 빈 프레젠테이션으로 진행할 수 있습니다.
+            # 여기서는 오류를 발생시키지 않고 진행하지만, 실제 상황에 따라 조치가 필요합니다.
+
+    except Exception as e:
+        print(f"[ERROR] 표지 슬라이드 데이터 채우기 중 오류 발생: {e}")
+        import traceback
+        traceback.print_exc()
+        # 표지 슬라이드 생성 실패 시에도 계속 진행할지, 아니면 여기서 중단할지 결정 필요
+        # raise e # 필요시 주석 해제
+
+    # 매물 슬라이드 생성
+    property_template_slide_index = 1 # 매물 정보 슬라이드 템플릿은 두 번째 슬라이드(인덱스 1)
+
+    if len(prs.slides) <= property_template_slide_index:
+        print(f"[ERROR] 템플릿에 매물 정보 슬라이드 (인덱스 {property_template_slide_index})가 충분히 없습니다.")
+        # 이 경우, 매물 슬라이드를 생성할 수 없으므로, 빈 PPT나 오류를 반환해야 할 수 있습니다.
+        # 여기서는 빈 PPT를 저장하고 반환하도록 합니다.
         try:
-            print("[INFO] 표지 슬라이드 생성 시작")
-            prs = Presentation(template_filepath)
+            prs.save(output_path)
+            print(f"[WARNING] 매물 정보 슬라이드 템플릿 부족으로, 내용이 없는 PPT 파일 저장: {output_path}")
+            return output_path
+        except Exception as e_save:
+            print(f"[ERROR] 내용 없는 PPT 파일 저장 중 오류 발생: {e_save}")
+            raise e_save
+
+
+    for idx, property_data_item in enumerate(properties_data):
+        print(f"[INFO] 매물 {idx + 1}/{len(properties_data)} 슬라이드 생성 시작")
+        
+        # 현재 매물에 대한 article_json_data 준비
+        current_article_json_data = {}
+        # articleDetail을 중첩된 딕셔너리로 할당해야 ppt_logic.mappings의 경로가 올바르게 작동합니다.
+        if "articleDetail" in property_data_item:
+            current_article_json_data["articleDetail"] = property_data_item.get("articleDetail", {})
+        else: # articleDetail이 없는 경우를 대비해 빈 딕셔너리 할당
+            current_article_json_data["articleDetail"] = {}
             
-            # 첫 번째 슬라이드(표지)에 필요한 정보만 채우기
-            # ppt_logic의 generate_presentation_logic과 다르게, 여기서는 매물 정보 슬라이드를 생성하지 않습니다.
-            # 표지 슬라이드만 처리하는 코드...
-            # (코드 추가 필요)
-            
-        except Exception as e:
-            print(f"[ERROR] 표지 슬라이드 생성 중 오류 발생: {e}")
+        if "articleAddition" in property_data_item:
+            current_article_json_data["articleAddition"] = property_data_item.get("articleAddition", {})
+        if "articlePrice" in property_data_item:
+            current_article_json_data["articlePrice"] = property_data_item.get("articlePrice", {})
+        if "articleSpace" in property_data_item:
+            current_article_json_data["articleSpace"] = property_data_item.get("articleSpace", {})
+        if "articlePhotos" in property_data_item:
+            current_article_json_data["articlePhotos"] = property_data_item.get("articlePhotos", [])
+        if "articleFloor" in property_data_item:
+            current_article_json_data["articleFloor"] = property_data_item.get("articleFloor", {})
+        if "administrationCostInfo" in property_data_item:
+            current_article_json_data["administrationCostInfo"] = property_data_item.get("administrationCostInfo", {})
+        
+        # 매물 순번 추가
+        current_article_json_data["매물순번"] = idx + 1
+        
+        # 지도 이미지 URL 추가 (필요한 경우)
+        if map_image_url:
+            current_article_json_data["mapImageUrl"] = map_image_url
+
+        current_slide_to_fill = None
+        try:
+            if idx == 0:
+                # 첫 번째 매물은 템플릿의 두 번째 슬라이드(인덱스 1)를 직접 사용
+                current_slide_to_fill = prs.slides[property_template_slide_index]
+                print(f"[DEBUG] 첫 번째 매물: 슬라이드 인덱스 {property_template_slide_index} 사용")
+            else:
+                # 이후 매물들은 템플릿의 두 번째 슬라이드를 복제하여 사용
+                print(f"[DEBUG] 매물 {idx + 1}: 슬라이드 인덱스 {property_template_slide_index} 복제 시도")
+                current_slide_to_fill = clone_slide(prs, property_template_slide_index)
+                print(f"[DEBUG] 매물 {idx + 1}: 슬라이드 복제 완료. 새 슬라이드 ID: {current_slide_to_fill.slide_id if current_slide_to_fill else 'None'}")
+
+            if current_slide_to_fill:
+                # fill_property_data 함수를 호출하여 슬라이드 내용 채우기
+                print(f"[INFO] 매물 {idx + 1}: fill_property_data 호출")
+                fill_property_data(current_slide_to_fill, current_article_json_data, client_data, ppt_logic_mappings)
+                print(f"[INFO] 매물 {idx + 1} 슬라이드 데이터 채우기 완료")
+            else:
+                print(f"[ERROR] 매물 {idx + 1}에 대한 슬라이드를 준비하지 못했습니다.")
+
+        except Exception as e_slide:
+            print(f"[ERROR] 매물 {idx + 1} 슬라이드 처리 중 오류 발생: {e_slide}")
             import traceback
             traceback.print_exc()
-            raise e
-    
-        # 각 매물마다 슬라이드 추가
-        for idx, property_data in enumerate(properties_data):
-            print(f"[INFO] 매물 {idx+1}/{len(properties_data)} 슬라이드 생성 중")
-            
-            # 매물 데이터 변환
-            article_json_data = {}
-            
-            # 매물 상세 정보
-            if "articleDetail" in property_data:
-                article_json_data.update(property_data.get("articleDetail", {}))
-            
-            # 추가 정보
-            if "articleAddition" in property_data:
-                article_json_data["articleAddition"] = property_data.get("articleAddition", {})
-            
-            # 매물 가격 정보 
-            if "articlePrice" in property_data:
-                article_json_data["articlePrice"] = property_data.get("articlePrice", {})
-            
-            # 면적 정보
-            if "articleSpace" in property_data:
-                article_json_data["articleSpace"] = property_data.get("articleSpace", {})
-            
-            # 사진 정보 처리
-            if "articlePhotos" in property_data:
-                article_json_data["articlePhotos"] = property_data.get("articlePhotos", [])
-            
-            # 층 정보
-            if "articleFloor" in property_data:
-                article_json_data["articleFloor"] = property_data.get("articleFloor", {})
-            
-            # 관리비 정보
-            if "administrationCostInfo" in property_data:
-                article_json_data["administrationCostInfo"] = property_data.get("administrationCostInfo", {})
-            
-            # 매물 순번 추가 (1부터 시작)
-            article_json_data["매물순번"] = idx + 1
-            
-            # 지도 이미지 처리 (이 부분은 ppt_logic에서 활용됩니다)
-            if map_image_url:
-                article_json_data["mapImageUrl"] = map_image_url
-            
-            try:
-                # 참고용 템플릿 슬라이드 인덱스 (두번째 슬라이드)
-                source_slide_idx = 1
-                
-                # 이 매물이 첫번째가 아니면 슬라이드 복제
-                if idx > 0:
-                    # 슬라이드 복제
-                    new_slide = clone_slide(prs, source_slide_idx)
-                else:
-                    # 첫번째 매물은 템플릿의 두번째 슬라이드 사용
-                    new_slide = prs.slides[source_slide_idx]
-                
-                # 복제된 슬라이드에 매물 정보 채우기
-                # (상세 구현은 필요에 따라 작성)
-                
-            except Exception as e:
-                print(f"[ERROR] 매물 {idx+1} 슬라이드 생성 중 오류 발생: {e}")
-                import traceback
-                traceback.print_exc()
-                
-    # PPT 파일 저장
+            # 개별 슬라이드 생성 오류 시 계속 진행할지 결정
+            # continue # 다음 매물로 넘어감
+
+    # 최종 PPT 파일 저장
     try:
         prs.save(output_path)
         print(f"[INFO] 다중 매물 PPT 파일 저장 완료: {output_path}")
